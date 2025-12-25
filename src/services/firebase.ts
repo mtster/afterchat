@@ -1,5 +1,12 @@
 import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import { 
+  initializeAuth, 
+  indexedDBLocalPersistence, 
+  browserLocalPersistence, 
+  GoogleAuthProvider, 
+  signInWithPopup, 
+  signInWithRedirect 
+} from "firebase/auth";
 import { getDatabase, ref, update } from "firebase/database";
 import { getMessaging, isSupported, getToken, onMessage } from "firebase/messaging";
 
@@ -19,7 +26,13 @@ if (!firebaseConfig.apiKey) {
 }
 
 const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
+
+// 1. Standardize Authentication Initialization with Persistence
+// We explicitly use indexedDBLocalPersistence for better PWA support on iOS where localStorage can be flaky in standalone mode.
+export const auth = initializeAuth(app, {
+  persistence: [indexedDBLocalPersistence, browserLocalPersistence]
+});
+
 export const db = getDatabase(app);
 export const googleProvider = new GoogleAuthProvider();
 
@@ -38,8 +51,19 @@ export const messaging = async () => {
 
 export const loginWithGoogle = async () => {
   try {
-    const result = await signInWithPopup(auth, googleProvider);
-    return result.user;
+    // Check if running in standalone mode (PWA installed)
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone;
+
+    if (isStandalone) {
+      // iOS PWA often blocks popups or they disappear when app minimizes. Use Redirect.
+      await signInWithRedirect(auth, googleProvider);
+      // Return null as we are redirecting away. The result is handled in App.tsx via getRedirectResult.
+      return null;
+    } else {
+      // Browser mode - Popup is smoother and doesn't reload the page
+      const result = await signInWithPopup(auth, googleProvider);
+      return result.user;
+    }
   } catch (error) {
     console.error("Google Login Error:", error);
     throw error;
