@@ -4,22 +4,21 @@ import { getDatabase, ref, set, push, onValue, update, get } from 'firebase/data
 import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 import { FIREBASE_CONFIG, VAPID_KEY } from '../constants';
 
-const env = (import.meta as any).env || {};
-
 // --- DEBUGGING START ---
-// This will print to your browser console (F12)
+// We check the FIREBASE_CONFIG object directly, as it contains the values injected by Vite.
 console.log("Firebase Config Check:", {
-  apiKey: env.VITE_FIREBASE_API_KEY ? "Loaded (Exists)" : "MISSING",
-  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN ? "Loaded (Exists)" : "MISSING",
-  projectId: env.VITE_FIREBASE_PROJECT_ID ? "Loaded (Exists)" : "MISSING",
-  fullConfig: FIREBASE_CONFIG // Inspect this object in console to see if values are undefined
+  apiKey: FIREBASE_CONFIG.apiKey ? "Loaded (Exists)" : "MISSING",
+  authDomain: FIREBASE_CONFIG.authDomain ? "Loaded (Exists)" : "MISSING",
+  projectId: FIREBASE_CONFIG.projectId ? "Loaded (Exists)" : "MISSING",
+  fullConfig: FIREBASE_CONFIG
 });
 
 if (!FIREBASE_CONFIG.apiKey) {
-  console.error("CRITICAL: Firebase API Key is missing. Check your .env file or Vercel Environment Variables.");
+  console.error("CRITICAL: Firebase API Key is missing. Check your .env file or Vercel Environment Variables. Ensure they start with VITE_.");
 }
 // --- DEBUGGING END ---
 
+// Initialize Firebase
 const app = initializeApp(FIREBASE_CONFIG);
 export const auth = getAuth(app);
 export const db = getDatabase(app);
