@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import './index.css';
 import ErrorBoundary from './components/ErrorBoundary';
+import DebugConsole from './components/DebugConsole';
 
 // 1. Dynamic Safe Area Meta Tag for iPhone X+
 const meta = document.createElement('meta');
@@ -24,6 +25,11 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+// 3. Initial Log for Debugger
+console.log("--- APP STARTED / RELOADED ---");
+console.log("User Agent:", navigator.userAgent);
+console.log("Window Location:", window.location.href);
+
 const rootElement = document.getElementById('root');
 if (!rootElement) throw new Error('Failed to find the root element');
 
@@ -32,6 +38,7 @@ const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
     <ErrorBoundary>
+      <DebugConsole />
       <App />
     </ErrorBoundary>
   </React.StrictMode>

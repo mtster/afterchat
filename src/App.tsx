@@ -6,6 +6,7 @@ import Login from './components/Login';
 import Rooms from './components/Rooms';
 import Profile from './components/Profile';
 import ChatView from './components/ChatView';
+import DebugConsole from './components/DebugConsole';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -20,10 +21,13 @@ const App: React.FC = () => {
   // This is crucial for the iOS PWA flow where we use signInWithRedirect
   useEffect(() => {
     const handleRedirectResult = async () => {
+      console.log("App mounted: Checking redirect result...");
       try {
         const result = await getRedirectResult(auth);
+        console.log("getRedirectResult returned:", result ? "User Found" : "Null");
+        
         if (result && result.user) {
-          console.log("Redirect login successful. User restored.");
+          console.log("Redirect login successful for user:", result.user.uid);
           // IMPORTANT: Update state immediately to prevent the login screen from flashing or looping
           const newUser = {
             uid: result.user.uid,
@@ -41,6 +45,8 @@ const App: React.FC = () => {
             photoURL: result.user.photoURL,
             lastOnline: Date.now()
           });
+        } else {
+            console.log("No redirect result. Waiting for normal auth listener...");
         }
       } catch (error) {
         console.error("Error handling redirect result:", error);
@@ -52,6 +58,7 @@ const App: React.FC = () => {
   // 1. Auth Listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser: User | null) => {
+      console.log("Auth State Changed:", firebaseUser ? `User ${firebaseUser.uid}` : "Logged Out");
       if (firebaseUser) {
         setUser({
           uid: firebaseUser.uid,
@@ -106,13 +113,19 @@ const App: React.FC = () => {
         <div className="animate-pulse flex flex-col items-center">
            <div className="h-8 w-8 bg-zinc-800 rounded-full mb-4"></div>
         </div>
+        <DebugConsole />
       </div>
     );
   }
 
   // 4. Login Screen
   if (!user) {
-    return <Login />;
+    return (
+        <>
+            <Login />
+            {/* Ensure debug console is visible on Login too */}
+        </>
+    ); 
   }
 
   // 5. Main App Layout

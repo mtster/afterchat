@@ -50,20 +50,30 @@ export const messaging = async () => {
 // --- Auth Helper Functions ---
 
 export const loginWithGoogle = async () => {
+  console.log("loginWithGoogle triggered.");
   try {
     // Check if running in standalone mode (PWA installed)
-    // (navigator as any).standalone is the specific check for iOS
     const isIOSStandalone = (window.navigator as any).standalone === true;
     const isStandalone = window.matchMedia('(display-mode: standalone)').matches || isIOSStandalone;
+    
+    console.log("Environment Detection:", {
+        isIOSStandalone,
+        matchMediaStandalone: window.matchMedia('(display-mode: standalone)').matches,
+        finalIsStandalone: isStandalone
+    });
 
     if (isStandalone) {
       // iOS PWA often blocks popups or they disappear when app minimizes. Use Redirect.
+      console.log("Attempting signInWithRedirect...");
       await signInWithRedirect(auth, googleProvider);
+      console.log("signInWithRedirect called. Page should redirect now.");
       // Return null as we are redirecting away. The result is handled in App.tsx via getRedirectResult.
       return null;
     } else {
       // Browser mode - Popup is smoother and doesn't reload the page
+      console.log("Attempting signInWithPopup...");
       const result = await signInWithPopup(auth, googleProvider);
+      console.log("signInWithPopup successful:", result.user.uid);
       return result.user;
     }
   } catch (error) {
