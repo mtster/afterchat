@@ -1,9 +1,8 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import DebugConsole from './components/DebugConsole'; 
 import './index.css';
-import ErrorBoundary from './components/ErrorBoundary';
-import { DebugConsole } from './components/DebugConsole';
 
 // 1. Dynamic Safe Area Meta Tag for iPhone X+
 const meta = document.createElement('meta');
@@ -16,30 +15,24 @@ if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker
       .register('/firebase-messaging-sw.js')
-      .then((registration) => {
-        console.log('SW registered: ', registration.scope);
-      })
       .catch((err) => {
-        console.log('SW registration failed: ', err);
+        console.error('SW registration failed: ', err);
       });
   });
 }
 
-// 3. Initial Log for Debugger
-console.log("--- APP STARTED / RELOADED ---");
-console.log("User Agent:", navigator.userAgent);
-console.log("Window Location:", window.location.href);
+// 3. Initial Log
+console.log("--- APP BOOTSTRAP ---");
 
 const rootElement = document.getElementById('root');
 if (!rootElement) throw new Error('Failed to find the root element');
 
 const root = ReactDOM.createRoot(rootElement);
 
+// Render DebugConsole OUTSIDE of App to ensure it shows even if App crashes
 root.render(
   <React.StrictMode>
-    <ErrorBoundary>
-      <DebugConsole />
-      <App />
-    </ErrorBoundary>
+    <DebugConsole />
+    <App />
   </React.StrictMode>
 );
