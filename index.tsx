@@ -2,53 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import './index.css';
-
-interface ErrorBoundaryProps {
-  children?: React.ReactNode;
-}
-
-interface ErrorBoundaryState {
-  hasError: boolean;
-  error: Error | null;
-}
-
-// Simple Error Boundary to catch render errors
-class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  public state: ErrorBoundaryState = { hasError: false, error: null };
-
-  constructor(props: ErrorBoundaryProps) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
-
-  static getDerivedStateFromError(error: Error) {
-    return { hasError: true, error };
-  }
-
-  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error("Uncaught error:", error, errorInfo);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div style={{ padding: '20px', backgroundColor: '#18181b', color: '#ef4444', height: '100vh', fontFamily: 'monospace' }}>
-          <h1>Something went wrong.</h1>
-          <p>Please check the console for more details.</p>
-          <pre style={{ backgroundColor: '#27272a', padding: '10px', borderRadius: '5px', overflow: 'auto' }}>
-            {this.state.error?.toString()}
-          </pre>
-          <p style={{ color: '#a1a1aa', marginTop: '20px' }}>
-            <strong>Debugging Tip:</strong> Check your Vercel Environment Variables. 
-            Ensure they start with <code>VITE_FIREBASE_</code>.
-          </p>
-        </div>
-      );
-    }
-
-    return this.props.children;
-  }
-}
+import ErrorBoundary from './components/ErrorBoundary';
 
 // Register Service Worker for PWA functionality
 if ('serviceWorker' in navigator) {
