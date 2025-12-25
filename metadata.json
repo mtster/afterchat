@@ -1,0 +1,8 @@
+{
+  "name": "Onyx Chat",
+  "description": "An advanced, elegant, all-black progressive web app for real-time messaging.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
