@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import './index.css';
 import ErrorBoundary from './components/ErrorBoundary';
-import DebugConsole from './components/DebugConsole';
+import { DebugConsole } from './components/DebugConsole';
 
 // 1. Dynamic Safe Area Meta Tag for iPhone X+
 const meta = document.createElement('meta');
