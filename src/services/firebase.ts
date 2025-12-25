@@ -28,7 +28,7 @@ if (!firebaseConfig.apiKey) {
 const app = initializeApp(firebaseConfig);
 
 // 1. Standardize Authentication Initialization with Persistence
-// We explicitly use indexedDBLocalPersistence for better PWA support on iOS where localStorage can be flaky in standalone mode.
+// Including browserLocalPersistence ensures fallback for environments where IndexedDB is flaky (like some iOS PWA contexts)
 export const auth = initializeAuth(app, {
   persistence: [indexedDBLocalPersistence, browserLocalPersistence]
 });
@@ -52,7 +52,9 @@ export const messaging = async () => {
 export const loginWithGoogle = async () => {
   try {
     // Check if running in standalone mode (PWA installed)
-    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone;
+    // (navigator as any).standalone is the specific check for iOS
+    const isIOSStandalone = (window.navigator as any).standalone === true;
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || isIOSStandalone;
 
     if (isStandalone) {
       // iOS PWA often blocks popups or they disappear when app minimizes. Use Redirect.

@@ -23,6 +23,17 @@ const App: React.FC = () => {
       try {
         const result = await getRedirectResult(auth);
         if (result && result.user) {
+          console.log("Redirect login successful. User restored.");
+          // IMPORTANT: Update state immediately to prevent the login screen from flashing or looping
+          const newUser = {
+            uid: result.user.uid,
+            email: result.user.email,
+            displayName: result.user.displayName,
+            photoURL: result.user.photoURL,
+          };
+          setUser(newUser);
+          setCurrentScreen(AppScreen.ROOMS);
+
           // Update user profile in DB after a successful redirect login
           updateUserProfile(result.user.uid, {
             email: result.user.email,
@@ -53,6 +64,8 @@ const App: React.FC = () => {
             setCurrentScreen(AppScreen.ROOMS);
         }
       } else {
+        // Only clear user if we aren't currently waiting for a redirect result (optional, but safer to trust the listener)
+        // For now, we trust the listener. The getRedirectResult above handles the edge case of the initial load return.
         setUser(null);
         setCurrentScreen(AppScreen.LOGIN);
       }
