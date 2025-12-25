@@ -1,5 +1,5 @@
 import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider } from "firebase/auth";
+import { getAuth, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 import { getDatabase, ref, update } from "firebase/database";
 import { getMessaging, isSupported, getToken, onMessage } from "firebase/messaging";
 
@@ -34,7 +34,19 @@ export const messaging = async () => {
   }
 };
 
-// --- Helper Functions ---
+// --- Auth Helper Functions ---
+
+export const loginWithGoogle = async () => {
+  try {
+    const result = await signInWithPopup(auth, googleProvider);
+    return result.user;
+  } catch (error) {
+    console.error("Google Login Error:", error);
+    throw error;
+  }
+};
+
+// --- Database & Messaging Helper Functions ---
 
 export const updateUserProfile = async (uid: string, data: any) => {
   const userRef = ref(db, `users/${uid}`);
