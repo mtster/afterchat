@@ -4,25 +4,32 @@ import App from './App';
 import './index.css';
 import ErrorBoundary from './components/ErrorBoundary';
 
-// Register Service Worker for PWA functionality
+// 1. Dynamic Safe Area Meta Tag for iPhone X+
+// This ensures the app respects the notch and home bar area
+const meta = document.createElement('meta');
+meta.name = "viewport";
+meta.content = "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover";
+document.getElementsByTagName('head')[0].appendChild(meta);
+
+// 2. Service Worker Registration
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker
-    .register('/firebase-messaging-sw.js')
-    .then((registration) => {
-      console.log('Service Worker registered with scope:', registration.scope);
-    })
-    .catch((err) => {
-      console.log('Service Worker registration failed:', err);
-    });
+  window.addEventListener('load', () => {
+    navigator.serviceWorker
+      .register('/firebase-messaging-sw.js')
+      .then((registration) => {
+        console.log('SW registered: ', registration.scope);
+      })
+      .catch((err) => {
+        console.log('SW registration failed: ', err);
+      });
+  });
 }
 
 const rootElement = document.getElementById('root');
-if (!rootElement) {
-    document.body.innerHTML = '<div style="color: red; padding: 20px;">Fatal Error: Could not find #root element</div>';
-    throw new Error('Failed to find the root element');
-}
+if (!rootElement) throw new Error('Failed to find the root element');
 
 const root = ReactDOM.createRoot(rootElement);
+
 root.render(
   <React.StrictMode>
     <ErrorBoundary>

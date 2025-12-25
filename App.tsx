@@ -16,7 +16,7 @@ const App: React.FC = () => {
   // Foreground Notification State
   const [notification, setNotification] = useState({ title: '', body: '' });
 
-  // Auth Listener
+  // 1. Auth Listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser: User | null) => {
       if (firebaseUser) {
@@ -26,6 +26,7 @@ const App: React.FC = () => {
           displayName: firebaseUser.displayName,
           photoURL: firebaseUser.photoURL,
         });
+        // If we were on login, go to rooms. Otherwise stay where we are (e.g. refresh)
         if (currentScreen === AppScreen.LOGIN) {
             setCurrentScreen(AppScreen.ROOMS);
         }
@@ -38,21 +39,19 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, [currentScreen]);
 
-  // Foreground Message Listener
+  // 2. Foreground Message Listener
   useEffect(() => {
     onMessageListener()
       .then((payload: any) => {
-        // UI notification for foreground
         if(payload?.notification) {
             setNotification({
-            title: payload.notification.title,
-            body: payload.notification.body,
+              title: payload.notification.title,
+              body: payload.notification.body,
             });
-            // Auto hide after 3 seconds
-            setTimeout(() => setNotification({ title: '', body: '' }), 3000);
+            setTimeout(() => setNotification({ title: '', body: '' }), 5000);
         }
       })
-      .catch((err) => console.log('failed: ', err));
+      .catch((err) => console.log('Message listener failed: ', err));
   }, []);
 
   const handleRoomSelect = (roomId: string) => {
@@ -65,24 +64,36 @@ const App: React.FC = () => {
     setCurrentScreen(AppScreen.ROOMS);
   };
 
-  if (loadingAuth) return <div className="bg-black h-screen w-screen" />;
+  // 3. Loading State (Prevents flicker)
+  if (loadingAuth) {
+    return (
+      <div className="flex items-center justify-center h-screen w-screen bg-black text-white">
+        <div className="animate-pulse flex flex-col items-center">
+           <div className="h-8 w-8 bg-zinc-800 rounded-full mb-4"></div>
+        </div>
+      </div>
+    );
+  }
 
+  // 4. Login Screen
   if (!user) {
     return <Login />;
   }
 
+  // 5. Main App Layout
   return (
-    <div className="h-full w-full relative flex flex-col bg-black">
-      {/* Foreground Notification Toast */}
+    <div className="h-[100dvh] w-screen relative flex flex-col bg-black text-white overflow-hidden">
+      
+      {/* Toast Notification */}
       {notification.title && (
-        <div className="fixed top-4 left-4 right-4 bg-zinc-800 border border-zinc-700 p-4 rounded-xl shadow-2xl z-50 animate-bounce">
+        <div className="fixed top-safe-top mt-4 left-4 right-4 bg-zinc-800/90 backdrop-blur-md border border-zinc-700 p-4 rounded-xl shadow-2xl z-[100] animate-bounce">
           <p className="font-bold text-white text-sm">{notification.title}</p>
           <p className="text-zinc-400 text-xs">{notification.body}</p>
         </div>
       )}
 
-      {/* Screen Router */}
-      <main className="flex-1 overflow-hidden relative">
+      {/* Main Content Area */}
+      <main className="flex-1 overflow-hidden relative w-full h-full pt-safe-top">
         {currentScreen === AppScreen.ROOMS && <Rooms onSelectRoom={handleRoomSelect} />}
         {currentScreen === AppScreen.PROFILE && <Profile user={user} />}
         {currentScreen === AppScreen.CHAT && activeRoomId && (
@@ -90,31 +101,31 @@ const App: React.FC = () => {
         )}
       </main>
 
-      {/* Bottom Navigation - Only show if not in Chat */}
+      {/* Tab Bar - Only show if NOT in Chat */}
       {currentScreen !== AppScreen.CHAT && (
-        <nav className="h-20 bg-background/90 backdrop-blur-lg border-t border-border flex justify-around items-center pb-safe-bottom z-40">
+        <nav className="h-20 bg-black/80 backdrop-blur-xl border-t border-zinc-800 flex justify-around items-start pt-3 pb-safe-bottom z-40 shrink-0">
           <button 
             onClick={() => setCurrentScreen(AppScreen.ROOMS)}
-            className={`flex flex-col items-center gap-1 p-2 w-20 transition-colors ${
+            className={`flex flex-col items-center gap-1 w-20 transition-all active:scale-95 ${
               currentScreen === AppScreen.ROOMS ? 'text-white' : 'text-zinc-600'
             }`}
           >
              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={currentScreen === AppScreen.ROOMS ? 2.5 : 2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
              </svg>
-             <span className="text-[10px] font-medium">Rooms</span>
+             <span className="text-[10px] font-medium tracking-wide">Chats</span>
           </button>
 
           <button 
             onClick={() => setCurrentScreen(AppScreen.PROFILE)}
-            className={`flex flex-col items-center gap-1 p-2 w-20 transition-colors ${
+            className={`flex flex-col items-center gap-1 w-20 transition-all active:scale-95 ${
               currentScreen === AppScreen.PROFILE ? 'text-white' : 'text-zinc-600'
             }`}
           >
              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={currentScreen === AppScreen.PROFILE ? 2.5 : 2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
              </svg>
-             <span className="text-[10px] font-medium">Profile</span>
+             <span className="text-[10px] font-medium tracking-wide">Profile</span>
           </button>
         </nav>
       )}

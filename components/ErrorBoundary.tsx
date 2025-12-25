@@ -9,8 +9,7 @@ interface State {
   error: Error | null;
 }
 
-class ErrorBoundary extends React.Component<Props, State> {
-  // Defined state as a class property to satisfy TS
+class ErrorBoundary extends Component<Props, State> {
   public state: State = { hasError: false, error: null };
 
   constructor(props: Props) {
