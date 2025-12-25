@@ -22,14 +22,14 @@ if ('serviceWorker' in navigator) {
 }
 
 // 3. Initial Log
-console.log("--- APP BOOTSTRAP ---");
+console.log("--- SRC/INDEX.TSX EXECUTED ---");
 
 const rootElement = document.getElementById('root');
 if (!rootElement) throw new Error('Failed to find the root element');
 
 const root = ReactDOM.createRoot(rootElement);
 
-// Render DebugConsole OUTSIDE of App to ensure it shows even if App crashes
+// CRITICAL: DebugConsole is rendered as a sibling to App to ensure it survives App crashes
 root.render(
   <React.StrictMode>
     <DebugConsole />

@@ -5,7 +5,7 @@ import Login from './components/Login';
 import Rooms from './components/Rooms';
 import Profile from './components/Profile';
 import ChatView from './components/ChatView';
-import { UserProfile, AppScreen } from './types';
+import { UserProfile } from './types';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -13,38 +13,39 @@ export default function App() {
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
 
   useEffect(() => {
-    console.log("--- APP MOUNTED: CHECKING AUTH ---");
+    console.log("STAGE 1: App Component Mounted");
 
-    // 1. Check for Redirect Result (The specific iOS fix)
-    getRedirectResult(auth)
-      .then((result) => {
-        if (result) {
-          console.log(">>> REDIRECT SUCCESS:", result.user.email);
-          setUser(result.user);
-          // Sync user to DB
-          updateUserProfile(result.user.uid, {
-            email: result.user.email,
-            displayName: result.user.displayName,
-            photoURL: result.user.photoURL,
-            lastOnline: Date.now()
-          });
-        } else {
-          console.log(">>> NO REDIRECT RESULT FOUND (Standard Load)");
+    const initAuth = async () => {
+        console.log("STAGE 2: Checking getRedirectResult...");
+        try {
+            const result = await getRedirectResult(auth);
+            if (result) {
+                console.log("STAGE 3 [SUCCESS]: Redirect Result Found for", result.user.email);
+                setUser(result.user);
+                updateUserProfile(result.user.uid, {
+                    email: result.user.email,
+                    displayName: result.user.displayName,
+                    photoURL: result.user.photoURL,
+                    lastOnline: Date.now()
+                });
+            } else {
+                console.log("STAGE 3 [INFO]: No Redirect Result.");
+            }
+        } catch (error: any) {
+            console.error("STAGE 3 [ERROR]: Redirect Failed", error.code, error.message);
         }
-      })
-      .catch((error) => {
-        console.error(">>> REDIRECT ERROR:", error.code, error.message);
-      });
+    };
 
-    // 2. Listen for normal auth changes
+    initAuth();
+
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      console.log("AUTH STATE CHANGED:", currentUser ? currentUser.email : "No User");
+      console.log("STAGE 4: onAuthStateChanged event:", currentUser ? currentUser.email : "NULL");
       if (currentUser) {
         setUser(currentUser);
       } else {
-        // Only clear if we really have no user. 
-        // Note: getRedirectResult usually resolves before or during this, 
-        // but if onAuthStateChanged fires "null" first, we might briefly see Login.
+        // Only clear if strictly necessary, to avoid flicker if redirect is processing
+        // But we must eventually clear if user is truly out.
+        // We will trust the event stream.
         setUser(null);
       }
     });
@@ -52,7 +53,6 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Adapt Firebase User to our UserProfile type for child components
   const userProfile: UserProfile | null = user ? {
     uid: user.uid,
     email: user.email,
@@ -66,14 +66,12 @@ export default function App() {
         <Login />
       ) : (
         <>
-          {/* Main Content Area */}
           <main className="flex-1 overflow-hidden relative w-full h-full pt-safe-top">
               {view === 'rooms' && <Rooms onSelectRoom={(id) => { setActiveRoomId(id); setView('chat'); }} />}
               {view === 'chat' && activeRoomId && <ChatView roomId={activeRoomId} currentUser={userProfile} onBack={() => setView('rooms')} />}
               {view === 'profile' && <Profile user={userProfile} />}
           </main>
 
-          {/* Navigation Bar - Only show if NOT in Chat */}
           {view !== 'chat' && (
               <nav className="h-20 bg-black/80 backdrop-blur-xl border-t border-zinc-800 flex justify-around items-start pt-3 pb-safe-bottom z-40 shrink-0">
               <button 

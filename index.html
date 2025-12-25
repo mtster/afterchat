@@ -15,8 +15,6 @@
     <meta name="format-detection" content="telephone=no" />
 
     <title>Onyx Chat</title>
-    <!-- Tailwind is now handled via index.css usually, but CDN is fine for quick prototypes if not building CSS. 
-         However, index.css is preferred with Vite. We keep CDN for safety but add script module. -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
@@ -52,6 +50,7 @@
 </head>
   <body class="bg-background text-white h-[100dvh] w-screen flex flex-col">
     <div id="root" class="flex-1 h-full w-full flex flex-col"></div>
-    <script type="module" src="/index.tsx"></script>
+    <!-- CRITICAL FIX: Pointing to src/index.tsx to bypass root files -->
+    <script type="module" src="/src/index.tsx"></script>
   </body>
 </html>

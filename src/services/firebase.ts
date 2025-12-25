@@ -1,4 +1,4 @@
-import { initializeApp } from "firebase/app";
+import { initializeApp, getApps, getApp } from "firebase/app";
 import { 
   initializeAuth, 
   indexedDBLocalPersistence, 
@@ -20,15 +20,16 @@ const firebaseConfig = {
   databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL
 };
 
-// Safety check to log error if variables are missing
+// Check config
 if (!firebaseConfig.apiKey) {
-  console.error("CRITICAL: Firebase API Key is missing from environment variables.");
+  console.error("CRITICAL: Firebase API Key missing.");
 }
 
-const app = initializeApp(firebaseConfig);
+// Singleton init
+const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-// 1. Standardize Authentication Initialization with Persistence
-// Including browserLocalPersistence ensures fallback for environments where IndexedDB is flaky (like some iOS PWA contexts)
+// 1. Explicit Persistence
+// 'browserLocalPersistence' is crucial for iOS PWA survival across reloads/redirects
 export const auth = initializeAuth(app, {
   persistence: [indexedDBLocalPersistence, browserLocalPersistence]
 });
@@ -36,53 +37,40 @@ export const auth = initializeAuth(app, {
 export const db = getDatabase(app);
 export const googleProvider = new GoogleAuthProvider();
 
-// Safe messaging initialization (Async to check support)
 export const messaging = async () => {
   try {
     const supported = await isSupported();
     return supported ? getMessaging(app) : null;
   } catch (err) {
-    console.warn("Firebase Messaging not supported in this environment.", err);
+    console.warn("Firebase Messaging not supported.", err);
     return null;
   }
 };
 
-// --- Auth Helper Functions ---
+// --- Helpers ---
 
 export const loginWithGoogle = async () => {
-  console.log("loginWithGoogle triggered.");
+  console.log("[Auth] loginWithGoogle triggered.");
   try {
-    // Check if running in standalone mode (PWA installed)
     const isIOSStandalone = (window.navigator as any).standalone === true;
     const isStandalone = window.matchMedia('(display-mode: standalone)').matches || isIOSStandalone;
     
-    console.log("Environment Detection:", {
-        isIOSStandalone,
-        matchMediaStandalone: window.matchMedia('(display-mode: standalone)').matches,
-        finalIsStandalone: isStandalone
-    });
+    console.log("[Auth] Environment:", { isStandalone, isIOSStandalone });
 
     if (isStandalone) {
-      // iOS PWA often blocks popups or they disappear when app minimizes. Use Redirect.
-      console.log("Attempting signInWithRedirect...");
+      console.log("[Auth] Using signInWithRedirect (Standalone Mode)");
       await signInWithRedirect(auth, googleProvider);
-      console.log("signInWithRedirect called. Page should redirect now.");
-      // Return null as we are redirecting away. The result is handled in App.tsx via getRedirectResult.
       return null;
     } else {
-      // Browser mode - Popup is smoother and doesn't reload the page
-      console.log("Attempting signInWithPopup...");
+      console.log("[Auth] Using signInWithPopup (Browser Mode)");
       const result = await signInWithPopup(auth, googleProvider);
-      console.log("signInWithPopup successful:", result.user.uid);
       return result.user;
     }
   } catch (error) {
-    console.error("Google Login Error:", error);
+    console.error("[Auth] Login Error:", error);
     throw error;
   }
 };
-
-// --- Database & Messaging Helper Functions ---
 
 export const updateUserProfile = async (uid: string, data: any) => {
   const userRef = ref(db, `users/${uid}`);
@@ -92,16 +80,11 @@ export const updateUserProfile = async (uid: string, data: any) => {
 export const requestNotificationPermission = async (uid: string) => {
   try {
     const msg = await messaging();
-    if (!msg) {
-        console.log("Messaging not supported.");
-        return null;
-    }
+    if (!msg) return null;
 
     const permission = await Notification.requestPermission();
     if (permission === 'granted') {
       const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY;
-      if (!vapidKey) console.warn("VITE_FIREBASE_VAPID_KEY is missing.");
-
       const token = await getToken(msg, { vapidKey });
       if (token) {
         await updateUserProfile(uid, { fcmToken: token });
