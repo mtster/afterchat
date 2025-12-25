@@ -5,7 +5,7 @@ import Login from './components/Login';
 import Rooms from './components/Rooms';
 import Profile from './components/Profile';
 import ChatView from './components/ChatView';
-import { UserProfile } from './types';
+import { UserProfile } from './types'; // Correct relative import for src/types.ts
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -43,9 +43,6 @@ export default function App() {
       if (currentUser) {
         setUser(currentUser);
       } else {
-        // Only clear if strictly necessary, to avoid flicker if redirect is processing
-        // But we must eventually clear if user is truly out.
-        // We will trust the event stream.
         setUser(null);
       }
     });

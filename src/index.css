@@ -1,0 +1,63 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Native App Resets */
+:root {
+  color-scheme: dark;
+  /* Safe Area Variables for iPhone Notch */
+  --sat: env(safe-area-inset-top);
+  --sab: env(safe-area-inset-bottom);
+  --sal: env(safe-area-inset-left);
+  --sar: env(safe-area-inset-right);
+}
+
+html, body {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden; /* Prevent elastic scrolling on body */
+  background-color: #000000;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  /* Prevent text selection to feel like an app */
+  user-select: none;
+  -webkit-user-select: none;
+  
+  /* Disable callout menu on long press */
+  -webkit-touch-callout: none;
+  
+  /* Optimize touch handling */
+  touch-action: pan-y;
+  
+  /* Disable tap highlight color on mobile */
+  -webkit-tap-highlight-color: transparent;
+}
+
+#root {
+  height: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Utilities for Safe Areas */
+.pt-safe-top {
+  padding-top: var(--sat);
+}
+
+.pb-safe-bottom {
+  padding-bottom: var(--sab);
+}
+
+/* Hide Scrollbar but allow scrolling */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
