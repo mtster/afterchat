@@ -5,7 +5,8 @@ import Login from './components/Login';
 import Rooms from './components/Rooms';
 import Profile from './components/Profile';
 import ChatView from './components/ChatView';
-import { UserProfile } from './types'; // Correct relative import for src/types.ts
+import DebugConsole from './components/DebugConsole';
+import { UserProfile } from './types'; 
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -59,6 +60,9 @@ export default function App() {
 
   return (
     <div className="h-[100dvh] w-screen relative flex flex-col bg-black text-white overflow-hidden">
+      {/* ALWAYS VISIBLE DEBUGGER */}
+      <DebugConsole />
+      
       {!userProfile ? (
         <Login />
       ) : (

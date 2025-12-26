@@ -2,113 +2,111 @@ import React, { useEffect, useState } from 'react';
 
 export default function DebugConsole() {
   const [logs, setLogs] = useState<string[]>([]);
-  const [isVisible, setIsVisible] = useState(true);
+  const [minimized, setMinimized] = useState(false);
 
   useEffect(() => {
-    // 1. Load existing logs
+    // 1. Recover logs from localStorage (Vital for iOS reload debugging)
     const saved = localStorage.getItem('onyx_debug_logs');
     if (saved) {
-        try {
-            setLogs(JSON.parse(saved));
-        } catch(e) {}
+      try {
+        setLogs(JSON.parse(saved));
+      } catch (e) {
+        console.warn("Failed to parse saved logs");
+      }
     }
 
-    // 2. Override console methods
+    // 2. Hijack console.log
     const originalLog = console.log;
-    const originalError = console.error;
-
     console.log = (...args) => {
+      originalLog.apply(console, args);
+      
       const msg = args.map(a => {
-        try { return (typeof a === 'object' ? JSON.stringify(a) : String(a)); } 
+        try { return typeof a === 'object' ? JSON.stringify(a) : String(a); }
         catch (e) { return '[Circular]'; }
       }).join(' ');
       
-      const newLog = `[LOG] ${new Date().toLocaleTimeString()}: ${msg}`;
+      const logLine = `[LOG] ${new Date().toLocaleTimeString().split(' ')[0]}: ${msg}`;
       
       setLogs(prev => {
-        const updated = [...prev, newLog].slice(-50);
-        localStorage.setItem('onyx_debug_logs', JSON.stringify(updated));
-        return updated;
+        const next = [...prev, logLine].slice(-50);
+        localStorage.setItem('onyx_debug_logs', JSON.stringify(next));
+        return next;
       });
-      originalLog.apply(console, args);
     };
 
+    // 3. Hijack console.error
+    const originalError = console.error;
     console.error = (...args) => {
+      originalError.apply(console, args);
+      
       const msg = args.map(a => {
-        try { return (typeof a === 'object' ? JSON.stringify(a) : String(a)); } 
+        try { return typeof a === 'object' ? JSON.stringify(a) : String(a); }
         catch (e) { return '[Circular]'; }
       }).join(' ');
 
-      const newLog = `[ERR] ${new Date().toLocaleTimeString()}: ${msg}`;
+      const logLine = `[ERR] ${new Date().toLocaleTimeString().split(' ')[0]}: ${msg}`;
+      
       setLogs(prev => {
-        const updated = [...prev, newLog].slice(-50);
-        localStorage.setItem('onyx_debug_logs', JSON.stringify(updated));
-        return updated;
+        const next = [...prev, logLine].slice(-50);
+        localStorage.setItem('onyx_debug_logs', JSON.stringify(next));
+        return next;
       });
-      originalError.apply(console, args);
     };
 
     return () => {
-        // Optional: restore console if needed, but for this app we want it persistent
+        // We typically don't restore in this debug mode to keep capturing
     };
   }, []);
 
-  const handleSystemReset = () => {
-      if(window.confirm("RESET SYSTEM? This clears logs and storage.")) {
-          localStorage.clear();
-          sessionStorage.clear();
-          window.location.reload();
-      }
-  };
-
-  if (!isVisible) {
-      return (
-          <button 
-            onClick={() => setIsVisible(true)}
+  if (minimized) {
+    return (
+        <button 
+            onClick={() => setMinimized(false)}
             style={{
-                position: 'fixed', bottom: '10px', right: '10px', 
-                zIndex: 2147483647, background: 'red', color: 'white', padding: '5px'
+                position: 'fixed', bottom: 10, right: 10, zIndex: 99999,
+                background: 'red', color: 'white', border: '1px solid white', padding: '5px'
             }}
-          >
-              SHOW DEBUG
-          </button>
-      );
+        >
+            DEBUG
+        </button>
+    )
   }
 
   return (
     <div style={{
-      position: 'fixed', 
-      bottom: 0, 
-      left: 0, 
-      right: 0, 
-      height: '300px',
-      backgroundColor: 'rgba(30, 0, 0, 0.95)', 
-      color: '#0f0',
-      zIndex: 2147483647, 
-      overflowY: 'scroll', 
-      padding: '10px',
-      borderTop: '2px solid red', 
-      fontSize: '11px', 
+      position: 'fixed',
+      bottom: 0,
+      left: 0,
+      width: '100vw',
+      height: '30vh',
+      zIndex: 99999,
+      backgroundColor: 'rgba(20, 0, 0, 0.95)',
+      color: '#00ff00',
+      fontSize: '12px',
+      overflowY: 'scroll',
+      pointerEvents: 'all',
+      borderTop: '2px solid red',
       fontFamily: 'monospace',
-      pointerEvents: 'auto'
+      display: 'flex',
+      flexDirection: 'column'
     }}>
       <div style={{
-          borderBottom: '1px solid #444', 
-          marginBottom: '5px', 
-          display:'flex', 
-          justifyContent:'space-between',
-          position: 'sticky',
-          top: 0,
-          background: 'rgba(30,0,0,1)'
+          padding: '5px', background: '#300', display: 'flex', justifyContent: 'space-between', 
+          borderBottom: '1px solid #f00', position: 'sticky', top: 0
       }}>
-        <strong>ONYX DEBUGGER (SRC)</strong>
-        <div style={{display:'flex', gap:'10px'}}>
-            <button onClick={() => setIsVisible(false)} style={{background: '#444', color:'white', border:'none', padding:'2px 5px'}}>HIDE</button>
-            <button onClick={() => {localStorage.removeItem('onyx_debug_logs'); setLogs([]);}} style={{background: 'orange', color: 'black', border: 'none', padding: '2px 5px'}}>CLEAR LOGS</button>
-            <button onClick={handleSystemReset} style={{background: 'red', color: 'white', border: 'none', padding: '2px 5px'}}>SYSTEM RESET</button>
-        </div>
+          <strong>ONYX DIAGNOSTIC</strong>
+          <div>
+            <button onClick={() => { localStorage.removeItem('onyx_debug_logs'); setLogs([]); }} style={{marginRight: 10, color: 'white'}}>CLEAR</button>
+            <button onClick={() => setMinimized(true)} style={{color: 'white'}}>MIN</button>
+          </div>
       </div>
-      {logs.map((l, i) => <div key={i} style={{borderBottom:'1px solid #222', padding:'2px 0'}}>{l}</div>)}
+      <div style={{padding: '5px'}}>
+        {logs.map((log, i) => (
+            <div key={i} style={{marginBottom: '2px', borderBottom: '1px solid #330'}}>
+                {log}
+            </div>
+        ))}
+      </div>
     </div>
   );
 }
