@@ -1,7 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
-// Import CSS from the SRC folder, not root
 import './index.css';
 
 // 1. Dynamic Safe Area Meta Tag for iPhone X+
@@ -24,7 +23,7 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-console.log("VITE_BUILD_CHECK: INDEX_LOADED");
+console.log("VITE_BUILD_CHECK: SRC/INDEX_LOADED");
 
 const rootElement = document.getElementById('root');
 if (!rootElement) throw new Error('Failed to find the root element');
