@@ -1,15 +1,14 @@
-// This file must be placed in the root of your public directory/hosting
 importScripts('https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/9.22.0/firebase-messaging-compat.js');
 
-// REPLACE WITH YOUR CONFIG
+// Hardcoded Config for Service Worker (Static File)
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyDySZZawrO-SMWtEEYlQJca82uxr9uDPt0",
+  authDomain: "afterchat.firebaseapp.com",
+  projectId: "afterchat",
+  storageBucket: "afterchat.firebasestorage.app",
+  messagingSenderId: "78791482786",
+  appId: "1:78791482786:web:59dc1d8d5bcdcc76d2a6fb"
 };
 
 firebase.initializeApp(firebaseConfig);
@@ -22,8 +21,8 @@ messaging.onBackgroundMessage((payload) => {
   const notificationTitle = payload.notification.title;
   const notificationOptions = {
     body: payload.notification.body,
-    icon: '/icon.png', // path to your icon
-    badge: '/badge.png' // path to your badge
+    icon: '/icon.png', // Ensure you have an icon in public/
+    // badge: '/badge.png'
   };
 
   self.registration.showNotification(notificationTitle, notificationOptions);
