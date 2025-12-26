@@ -18,45 +18,94 @@ export default function App() {
   useEffect(() => {
     let unsubscribe: () => void;
 
+    // --- AGGRESSIVE HANDSHAKE FUNCTION ---
+    const runHandshake = async () => {
+        const isPending = localStorage.getItem('onyx_auth_redirect_pending') === 'true';
+        if (!isPending) {
+            console.log("[Handshake] No pending redirect flag found.");
+            return;
+        }
+
+        console.log("[Handshake] Starting aggressive check...");
+        
+        // Retry mechanism: 3 attempts with 500ms delay
+        for (let i = 1; i <= 3; i++) {
+            try {
+                console.log(`[Handshake] Attempt ${i}/3`);
+                const result = await getRedirectResult(auth);
+                if (result?.user) {
+                    console.log("[Handshake] SUCCESS: User retrieved:", result.user.email);
+                    
+                    // Cleanup Flag
+                    localStorage.removeItem('onyx_auth_redirect_pending');
+                    
+                    // Set User
+                    setUser(result.user);
+                    setLoadingAuth(false);
+                    
+                    // Sync Profile
+                    updateUserProfile(result.user.uid, {
+                        email: result.user.email,
+                        displayName: result.user.displayName,
+                        photoURL: result.user.photoURL,
+                        lastOnline: Date.now()
+                    });
+                    return; // Handshake complete
+                } else {
+                     console.log(`[Handshake] Attempt ${i}: No result returned.`);
+                }
+            } catch (e: any) {
+                console.error(`[Handshake] Error attempt ${i}:`, e.code, e.message);
+            }
+            // Wait 500ms before next retry
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+
+        // Exhausted
+        console.log("[Handshake] Exhausted all attempts. Clearing flag.");
+        localStorage.removeItem('onyx_auth_redirect_pending');
+        
+        // If we are still loading and no user found, release the loading state
+        // (Only if onAuthStateChanged hasn't already handled it)
+        if (!auth.currentUser) {
+            console.log("[Handshake] No user found after exhaustion. Releasing load state.");
+            setLoadingAuth(false);
+        }
+    };
+
     const initAuth = async () => {
         try {
             console.log("STAGE 1: Init Auth - Setting Persistence");
-            // 1. Force Persistence (Critical for iOS)
             await setPersistence(auth, browserLocalPersistence);
             
-            // 2. Consume Redirect Result (Standalone PWA Handshake)
-            // We await this BEFORE listening to auth state to catch the token
-            console.log("STAGE 2: Checking Redirect Result");
-            const redirectResult = await getRedirectResult(auth);
-            
-            if (redirectResult && redirectResult.user) {
-                console.log("STAGE 2 [SUCCESS]: Redirect User Found:", redirectResult.user.email);
-                setUser(redirectResult.user);
-                
-                // Update DB immediately to ensure consistency
-                updateUserProfile(redirectResult.user.uid, {
-                    email: redirectResult.user.email,
-                    displayName: redirectResult.user.displayName,
-                    photoURL: redirectResult.user.photoURL,
-                    lastOnline: Date.now()
-                });
-            } else {
-                console.log("STAGE 2: No Redirect Result");
-            }
+            // Run handshake immediately on mount
+            await runHandshake();
 
-            // 3. Attach Listener ONLY after Redirect Check is done
-            // This prevents 'null' from overwriting a pending redirect user
+            // 3. Attach Listener
             unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-                console.log("STAGE 3: Auth State Changed:", currentUser ? currentUser.email : "NULL");
+                const isPending = localStorage.getItem('onyx_auth_redirect_pending') === 'true';
+                
+                console.log("STAGE 3: Auth State Changed:", currentUser ? currentUser.email : "NULL", `Pending: ${isPending}`);
                 
                 if (currentUser) {
+                    // Success case
+                    localStorage.removeItem('onyx_auth_redirect_pending');
                     setUser(currentUser);
+                    setLoadingAuth(false);
                 } else {
-                    setUser(null);
-                    setView({ name: 'ROOMS_LIST' });
+                    // No user in Auth State
+                    if (isPending) {
+                        console.log("[AuthGuard] User is null but Pending Flag is TRUE. Waiting for Handshake...");
+                        // Do NOT set user to null yet. Wait for handshake logic to finish and clear the flag.
+                        // We trigger handshake again just in case.
+                        runHandshake();
+                    } else {
+                        // Truly logged out
+                        setUser(null);
+                        setLoadingAuth(false);
+                        setView({ name: 'ROOMS_LIST' });
+                    }
                 }
-                
-                setLoadingAuth(false);
             });
 
         } catch (error: any) {
@@ -67,8 +116,18 @@ export default function App() {
 
     initAuth();
 
+    // Visibility Listener to re-trigger handshake when returning to app (iOS PWA)
+    const handleVisibilityChange = () => {
+        if (document.visibilityState === 'visible') {
+            console.log("[App] Visibility changed to VISIBLE. Checking handshake.");
+            runHandshake();
+        }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
         if (unsubscribe) unsubscribe();
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
 
@@ -105,8 +164,9 @@ export default function App() {
 
   if (loadingAuth) {
       return (
-        <div className="h-[100dvh] w-screen bg-black flex items-center justify-center">
+        <div className="h-[100dvh] w-screen bg-black flex flex-col items-center justify-center gap-4">
             <div className="w-12 h-12 rounded-full border-2 border-zinc-800 border-t-white animate-spin" />
+            <p className="text-zinc-500 text-xs font-mono">AUTHENTICATING SECURE CHANNEL...</p>
         </div>
       );
   }

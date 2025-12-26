@@ -122,35 +122,50 @@ export const findUserByEmailOrUsername = async (searchTerm: string): Promise<Roo
 
 // 1. ADD: User A adds User B
 // Writes to BOTH User A's `addedUsers` and User B's `pendingApprovals`
-// REQUIRES: Rules allowing write to users/$target/pendingApprovals
+// FIX: Split into separate updates to target specific nodes to avoid root-level write permission issues
 export const addRoomerToUser = async (currentUid: string, targetUid: string) => {
-  const updates: any = {};
-  updates[`users/${currentUid}/addedUsers/${targetUid}`] = 'pending';
-  updates[`users/${targetUid}/pendingApprovals/${currentUid}`] = true;
-  await update(ref(db), updates);
+  // Update 1: My List
+  await update(ref(db, `users/${currentUid}/addedUsers`), {
+    [targetUid]: 'pending'
+  });
+
+  // Update 2: Their List
+  await update(ref(db, `users/${targetUid}/pendingApprovals`), {
+    [currentUid]: true
+  });
 };
 
 // 2. APPROVE: User B accepts User A
 export const approveRoomer = async (currentUid: string, targetUid: string) => {
-    const updates: any = {};
-    // Move from pendingApprovals to addedUsers for Me (B)
-    updates[`users/${currentUid}/pendingApprovals/${targetUid}`] = null;
-    updates[`users/${currentUid}/addedUsers/${targetUid}`] = 'accepted';
+    // Similar split strategy for safety against permission denied
+    // 1. Update Me
+    const myUpdates = {
+        [`pendingApprovals/${targetUid}`]: null,
+        [`addedUsers/${targetUid}`]: 'accepted'
+    };
+    await update(ref(db, `users/${currentUid}`), myUpdates);
     
-    // Update the Other Person (A) to show status as accepted
-    updates[`users/${targetUid}/addedUsers/${currentUid}`] = 'accepted';
-    
-    await update(ref(db), updates);
+    // 2. Update Them
+    await update(ref(db, `users/${targetUid}/addedUsers`), {
+        [currentUid]: 'accepted'
+    });
 };
 
 // 3. REJECT / DELETE: User B rejects A, OR User A deletes B
 export const deleteRoomer = async (currentUid: string, targetUid: string) => {
-    const updates: any = {};
-    updates[`users/${currentUid}/addedUsers/${targetUid}`] = null;
-    updates[`users/${currentUid}/pendingApprovals/${targetUid}`] = null;
-    updates[`users/${targetUid}/addedUsers/${currentUid}`] = null;
-    updates[`users/${targetUid}/pendingApprovals/${currentUid}`] = null;
-    await update(ref(db), updates);
+    // 1. Update Me
+    const myUpdates = {
+        [`addedUsers/${targetUid}`]: null,
+        [`pendingApprovals/${targetUid}`]: null
+    };
+    await update(ref(db, `users/${currentUid}`), myUpdates);
+
+    // 2. Update Them
+    const theirUpdates = {
+        [`addedUsers/${currentUid}`]: null,
+        [`pendingApprovals/${currentUid}`]: null
+    };
+    await update(ref(db, `users/${targetUid}`), theirUpdates);
 };
 
 // Helper to fetch details
