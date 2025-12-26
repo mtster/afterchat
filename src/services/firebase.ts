@@ -95,9 +95,6 @@ export const findUserByEmailOrUsername = async (searchTerm: string): Promise<Roo
     snapshot = await get(q);
     
     // 3. Forgiving Search (Try to match lowercase/capitalization variations if simple match fails)
-    // NOTE: Firebase does not support native case-insensitive queries. 
-    // We assume the user creates usernames as $Name. 
-    // If the search failed, we try a capitalized version if the input was lowercase.
     if (!snapshot.exists() && cleanTerm.startsWith('$')) {
         const namePart = cleanTerm.substring(1);
         const capitalized = '$' + namePart.charAt(0).toUpperCase() + namePart.slice(1);
@@ -109,7 +106,6 @@ export const findUserByEmailOrUsername = async (searchTerm: string): Promise<Roo
   if (snapshot.exists()) {
     const uid = Object.keys(snapshot.val())[0];
     const userData = snapshot.val()[uid];
-    // Return base roomer info (status undefined here)
     return {
       uid,
       displayName: userData.displayName || 'Unknown',
@@ -125,13 +121,12 @@ export const findUserByEmailOrUsername = async (searchTerm: string): Promise<Roo
 // --- ROOMER APPROVAL FLOW ---
 
 // 1. ADD: User A adds User B
+// Writes to BOTH User A's `addedUsers` and User B's `pendingApprovals`
+// REQUIRES: Rules allowing write to users/$target/pendingApprovals
 export const addRoomerToUser = async (currentUid: string, targetUid: string) => {
   const updates: any = {};
-  // A considers B as "pending" in their added list
   updates[`users/${currentUid}/addedUsers/${targetUid}`] = 'pending';
-  // B sees A in their "pendingApprovals" list
   updates[`users/${targetUid}/pendingApprovals/${currentUid}`] = true;
-  
   await update(ref(db), updates);
 };
 
@@ -151,26 +146,10 @@ export const approveRoomer = async (currentUid: string, targetUid: string) => {
 // 3. REJECT / DELETE: User B rejects A, OR User A deletes B
 export const deleteRoomer = async (currentUid: string, targetUid: string) => {
     const updates: any = {};
-    
-    // Clean up my lists
     updates[`users/${currentUid}/addedUsers/${targetUid}`] = null;
     updates[`users/${currentUid}/pendingApprovals/${targetUid}`] = null;
-
-    // Clean up their lists (So the chat disappears/blocks for them too)
-    // "If User A has deleted User B, User B should see a message..."
-    // To support "User B sees a message", we actually REMOVE the valid connection.
-    // However, if we fully remove the node, the chat disappears from the list entirely.
-    // If we want the chat to remain but be "blocked", we would need a 'blocked' status.
-    // The requirement says: "If User A has deleted User B, User B should see a message... This message must replace the message input".
-    // This implies User B still SEES the chat in the list.
-    // BUT, the requirement ALSO says "where all of the roomers the user has added are displayed".
-    // If I delete you, you are no longer in my added list.
-    // Let's stick to the prompt for rejection: "The entry is removed from User B's pendingApprovals and User A's addedUsers."
-    
-    // Rejection Logic (Pre-acceptance)
     updates[`users/${targetUid}/addedUsers/${currentUid}`] = null;
     updates[`users/${targetUid}/pendingApprovals/${currentUid}`] = null;
-
     await update(ref(db), updates);
 };
 

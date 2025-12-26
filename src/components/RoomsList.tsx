@@ -33,7 +33,6 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
         if (data.addedUsers) {
              const addedUids = Object.keys(data.addedUsers);
              const addedDetails = await Promise.all(addedUids.map(async (uid) => {
-                 // Check value to see if pending or accepted
                  const val = data.addedUsers[uid];
                  const status = val === 'accepted' ? 'accepted' : 'pending_outgoing';
                  return getRoomerDetails(uid, status);
@@ -49,7 +48,6 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
         }
       }
       
-      // Deduplicate (in case of race condition logic)
       const unique = Array.from(new Map(allRoomers.map(item => [item.uid, item])).values());
       setRoomers(unique);
       setLoading(false);
@@ -71,7 +69,6 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
         if (result.uid === currentUser.uid) {
             setSearchError("You cannot add yourself.");
         } else {
-            // Check if already added
             const exists = roomers.find(r => r.uid === result.uid);
             if (exists) {
                 setSearchError("User already in your rooms.");
@@ -82,8 +79,9 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
       } else {
         setSearchError('User not found.');
       }
-    } catch (err) {
-      setSearchError('Search failed.');
+    } catch (err: any) {
+      console.error("Search Error:", err);
+      setSearchError(err.code === 'PERMISSION_DENIED' ? "Access Denied: Check DB Rules" : "Search failed.");
     }
   };
 
@@ -95,22 +93,37 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
       setShowAddModal(false);
       setSearchTerm('');
       setSearchResult(null);
-    } catch (err) {
-      console.error(err);
-      alert("Could not add user.");
+    } catch (err: any) {
+      console.error("Add Roomer Error:", err);
+      // Explicit error handling for user feedback
+      let msg = "Could not add user.";
+      if (err.code === 'PERMISSION_DENIED') {
+          msg = "Permission Denied. DB Rules prevent adding.";
+      }
+      alert(`${msg}\nCode: ${err.code || 'UNKNOWN'}`);
     }
     setIsProcessing(false);
   };
 
   const handleApprove = async (e: React.MouseEvent, uid: string) => {
       e.stopPropagation();
-      await approveRoomer(currentUser.uid, uid);
+      try {
+        await approveRoomer(currentUser.uid, uid);
+      } catch (err: any) {
+          console.error("Approve Error:", err);
+          alert(`Failed to approve: ${err.code}`);
+      }
   };
 
   const handleReject = async (e: React.MouseEvent, uid: string) => {
       e.stopPropagation();
       if(window.confirm("Reject this request?")) {
-        await deleteRoomer(currentUser.uid, uid);
+        try {
+            await deleteRoomer(currentUser.uid, uid);
+        } catch (err: any) {
+            console.error("Reject Error:", err);
+            alert(`Failed to reject: ${err.code}`);
+        }
       }
   };
 
@@ -121,7 +134,6 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
         <h1 className="text-2xl font-bold text-white tracking-tight">Rooms</h1>
         
         <div className="flex items-center gap-3">
-          {/* Add Roomer Button */}
           <button 
             onClick={() => setShowAddModal(true)}
             className="w-8 h-8 flex items-center justify-center rounded-full bg-zinc-800 hover:bg-zinc-700 active:scale-95 transition-all text-zinc-300"
@@ -131,7 +143,6 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
             </svg>
           </button>
 
-          {/* Profile Circle */}
           <button 
             onClick={onNavigateProfile}
             className="w-8 h-8 rounded-full overflow-hidden border border-zinc-700 active:scale-95 transition-transform"
@@ -177,7 +188,6 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
                     onClick={() => onNavigateChat(roomer)}
                     className={`w-full flex items-center gap-4 p-3 rounded-xl transition-colors active:bg-zinc-900 ${isPending ? 'bg-zinc-900/20 opacity-70' : 'hover:bg-zinc-900/50'}`}
                   >
-                    {/* Avatar */}
                     <div className={`w-12 h-12 rounded-full overflow-hidden flex-shrink-0 border ${isPending ? 'border-zinc-800 opacity-50' : 'border-zinc-700'}`}>
                       {roomer.photoURL ? (
                         <img src={roomer.photoURL} alt={roomer.displayName} className="w-full h-full object-cover" />
@@ -188,7 +198,6 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
                       )}
                     </div>
                     
-                    {/* Info */}
                     <div className="flex-1 text-left min-w-0">
                       <div className="flex justify-between items-baseline">
                         <h3 className={`font-medium truncate ${isPending ? 'text-zinc-400' : 'text-white'}`}>{roomer.displayName}</h3>
@@ -198,7 +207,6 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
                       </p>
                     </div>
 
-                    {/* Action Buttons for Incoming Pending */}
                     {isIncoming && (
                         <div className="flex gap-2">
                             <div 
@@ -221,7 +229,6 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
         )}
       </div>
 
-      {/* Add Roomer Modal */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
           <div className="w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-2xl">
@@ -238,7 +245,6 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
                 />
             </form>
 
-            {/* Results Area */}
             {searchError && <p className="text-red-400 text-sm mb-4 text-center">{searchError}</p>}
             
             {searchResult && (

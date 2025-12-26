@@ -12,13 +12,13 @@ document.getElementsByTagName('head')[0].appendChild(meta);
 // 2. Service Worker Registration
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
+    // FIX: Use root-relative path to ensure it loads from public/ regardless of current route
     navigator.serviceWorker
       .register('/firebase-messaging-sw.js')
       .then((registration) => {
         console.log('SW registered with scope: ', registration.scope);
       })
       .catch((err) => {
-        // Explicitly log message and object to avoid "{}" output
         console.error('SW registration failed:', err.message, err);
       });
   });
