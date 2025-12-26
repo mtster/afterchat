@@ -3,7 +3,8 @@ import {
   getAuth, 
   GoogleAuthProvider,
   setPersistence,
-  browserLocalPersistence
+  browserLocalPersistence,
+  indexedDBLocalPersistence
 } from "firebase/auth";
 import { 
   getDatabase, 
@@ -34,6 +35,12 @@ export const auth = getAuth(app);
 export const db = getDatabase(app);
 export const googleProvider = new GoogleAuthProvider();
 
+// Force persistence to local to fix iOS PWA Redirects
+// We chain this to ensure it completes before other auth actions might occur
+setPersistence(auth, browserLocalPersistence)
+    .then(() => console.log("FIREBASE: Persistence set to LOCAL"))
+    .catch((err) => console.error("FIREBASE: Persistence Error", err));
+
 export const messaging = async () => {
   try {
     const supported = await isSupported();
@@ -43,8 +50,6 @@ export const messaging = async () => {
     return null;
   }
 };
-
-setPersistence(auth, browserLocalPersistence).catch(console.error);
 
 // --- User Management ---
 
@@ -85,13 +90,23 @@ export const findUserByEmailOrUsername = async (searchTerm: string): Promise<Roo
   return null;
 };
 
+// BIDIRECTIONAL ADDING
 export const addRoomerToUser = async (currentUid: string, targetUid: string) => {
-  // Add targetUid to currentUid's roomers list
   const updates: any = {};
+  // Add target to current user's list
   updates[`users/${currentUid}/roomers/${targetUid}`] = true;
-  // Optional: Add currentUid to targetUid's roomers list (mutual) - removing for now to keep it unidirectional like a contact book, 
-  // but usually chat apps are bidirectional. Let's stick to unidirectional for simplicity of permissions.
+  // Add current user to target's list (Bidirectional)
+  updates[`users/${targetUid}/roomers/${currentUid}`] = true;
+  
   await update(ref(db), updates);
+};
+
+export const deleteRoomer = async (currentUid: string, targetUid: string) => {
+    const updates: any = {};
+    // Only remove from the current user's view (Contacts list)
+    // We do not remove from the other person to avoid griefing/confusion
+    updates[`users/${currentUid}/roomers/${targetUid}`] = null;
+    await update(ref(db), updates);
 };
 
 export const getRoomerDetails = async (uid: string): Promise<Roomer | null> => {

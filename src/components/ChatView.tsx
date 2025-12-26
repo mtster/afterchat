@@ -13,7 +13,19 @@ interface ChatViewProps {
 const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onBack }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
+  const [isVisible, setIsVisible] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Animation Mount
+  useEffect(() => {
+    // Small delay to trigger CSS transition
+    setTimeout(() => setIsVisible(true), 10);
+  }, []);
+
+  const handleBack = () => {
+    setIsVisible(false);
+    setTimeout(onBack, 300); // Wait for animation to finish
+  };
 
   useEffect(() => {
     const messagesRef = ref(db, `rooms/${roomId}/messages`);
@@ -44,7 +56,6 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
     const messageContent = inputText;
     const messagesRef = ref(db, `rooms/${roomId}/messages`);
     
-    // 1. Save to Firebase
     await push(messagesRef, {
       senderId: currentUser.uid,
       senderName: currentUser.displayName || 'User',
@@ -52,7 +63,6 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
       timestamp: serverTimestamp()
     });
 
-    // 2. Trigger Instant Notification via Google Apps Script (Optional)
     const GAS_URL = "https://script.google.com/macros/s/AKfycbzi-1KXALb-CqR2iDAFHiJcXs6P6cnHgRmP_-Kzdgktz0xkhWLfIdott8fGHBVByrfkag/exec";
     try {
         fetch(GAS_URL, {
@@ -69,23 +79,28 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
   };
 
   return (
-    <div className="flex flex-col h-full w-full bg-background fixed inset-0 z-20">
+    <div 
+        className={`flex flex-col h-full w-full bg-background fixed inset-0 z-20 transition-transform duration-300 ease-in-out ${isVisible ? 'translate-x-0' : 'translate-x-full'}`}
+    >
       {/* Header */}
-      <div className="flex items-center px-2 py-3 border-b border-border bg-background/90 backdrop-blur-md pt-safe-top">
+      <div className="grid grid-cols-3 items-center px-4 py-3 border-b border-border bg-background/90 backdrop-blur-md pt-safe-top">
+        {/* Left: Back Arrow */}
         <button 
-          onClick={onBack}
-          className="flex items-center text-blue-500 px-2 py-1 active:opacity-50"
+          onClick={handleBack}
+          className="justify-self-start text-white p-2 -ml-2 active:opacity-50"
         >
-          <svg className="w-6 h-6 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
-          <span className="text-[17px]">Rooms</span>
         </button>
         
-        <div className="flex-1 flex flex-col items-center justify-center mr-10">
-            <span className="font-semibold text-[17px]">{recipient.displayName}</span>
-            <span className="text-[10px] text-zinc-500">{recipient.username || recipient.email}</span>
+        {/* Center: Name */}
+        <div className="flex flex-col items-center justify-center">
+            <span className="font-semibold text-[17px] text-white truncate max-w-[150px]">{recipient.displayName}</span>
         </div>
+
+        {/* Right: Empty for balance */}
+        <div />
       </div>
 
       {/* Messages */}

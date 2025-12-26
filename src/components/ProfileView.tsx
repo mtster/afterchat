@@ -1,15 +1,36 @@
-import React, { useState } from 'react';
-import { UserProfile } from '../types';
-import { updateUserProfile, auth } from '../services/firebase';
+import React, { useState, useEffect } from 'react';
+import { UserProfile, Roomer } from '../types';
+import { updateUserProfile, auth, db, getRoomerDetails, deleteRoomer } from '../services/firebase';
+import { ref, onValue } from 'firebase/database';
 
 interface Props {
   currentUser: UserProfile;
   onBack: () => void;
+  toggleTheme: () => void;
+  isDarkMode: boolean;
 }
 
-export default function ProfileView({ currentUser, onBack }: Props) {
+export default function ProfileView({ currentUser, onBack, toggleTheme, isDarkMode }: Props) {
   const [username, setUsername] = useState(currentUser.username || '$');
   const [saving, setSaving] = useState(false);
+  const [myRoomers, setMyRoomers] = useState<Roomer[]>([]);
+  const [showSettings, setShowSettings] = useState(false);
+
+  // Fetch Roomers for management list
+  useEffect(() => {
+    const roomersRef = ref(db, `users/${currentUser.uid}/roomers`);
+    const unsub = onValue(roomersRef, async (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+            const uids = Object.keys(data);
+            const details = await Promise.all(uids.map(uid => getRoomerDetails(uid)));
+            setMyRoomers(details.filter(r => r !== null) as Roomer[]);
+        } else {
+            setMyRoomers([]);
+        }
+    });
+    return () => unsub();
+  }, [currentUser.uid]);
 
   const handleSaveUsername = async () => {
     if (!username.startsWith('$') || username.length < 2) {
@@ -26,19 +47,51 @@ export default function ProfileView({ currentUser, onBack }: Props) {
     setSaving(false);
   };
 
+  const handleDeleteRoomer = async (targetUid: string) => {
+      if (window.confirm("Delete this chat?")) {
+          await deleteRoomer(currentUser.uid, targetUid);
+      }
+  };
+
   const handleSignOut = () => {
     auth.signOut();
     window.location.reload();
   };
 
+  if (showSettings) {
+      return (
+        <div className="flex flex-col h-full w-full bg-background fixed inset-0 z-30">
+            <div className="pt-safe-top px-4 py-3 flex items-center border-b border-border">
+                <button onClick={() => setShowSettings(false)} className="flex items-center text-zinc-400 hover:text-white">
+                    <svg className="w-6 h-6 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                    Back
+                </button>
+                <span className="font-semibold text-lg flex-1 text-center pr-16">Settings</span>
+            </div>
+            <div className="p-6">
+                <div className="flex items-center justify-between p-4 bg-zinc-900 rounded-xl border border-zinc-800">
+                    <span className="text-white font-medium">Dark Mode</span>
+                    <button 
+                        onClick={toggleTheme}
+                        className={`w-12 h-6 rounded-full p-1 transition-colors ${isDarkMode ? 'bg-blue-600' : 'bg-zinc-600'}`}
+                    >
+                        <div className={`w-4 h-4 bg-white rounded-full shadow-md transform transition-transform ${isDarkMode ? 'translate-x-6' : 'translate-x-0'}`} />
+                    </button>
+                </div>
+            </div>
+        </div>
+      );
+  }
+
   return (
-    <div className="flex flex-col h-full w-full bg-black z-30 fixed inset-0">
+    <div className="flex flex-col h-full w-full bg-background z-30 fixed inset-0 overflow-y-auto no-scrollbar">
        {/* Header */}
-       <div className="pt-safe-top px-4 py-3 flex items-center border-b border-zinc-800">
-        <button onClick={onBack} className="text-zinc-400 hover:text-white mr-4">
-            <span className="text-lg">Close</span>
+       <div className="pt-safe-top px-4 py-3 flex items-center border-b border-border bg-background/95 backdrop-blur-sm sticky top-0">
+        <button onClick={onBack} className="text-zinc-400 hover:text-white mr-4 flex items-center gap-1">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+            <span className="text-lg">Rooms</span>
         </button>
-        <span className="font-semibold text-lg flex-1 text-center pr-12">Profile</span>
+        <span className="font-semibold text-lg flex-1 text-center pr-20">Profile</span>
       </div>
 
       <div className="p-6 flex flex-col items-center">
@@ -53,13 +106,26 @@ export default function ProfileView({ currentUser, onBack }: Props) {
              )}
         </div>
 
-        <h2 className="text-xl font-bold text-white mb-1">{currentUser.displayName}</h2>
-        <p className="text-zinc-500 text-sm mb-8">{currentUser.email}</p>
+        <h2 className="text-xl font-bold text-white mb-1">{username}</h2>
+        <p className="text-zinc-500 text-sm">{currentUser.email}</p>
+        <p className="text-blue-500 text-xs font-bold mt-2 uppercase tracking-wide">
+            {myRoomers.length} Active Roomer{myRoomers.length !== 1 && 's'}
+        </p>
 
-        {/* Settings Form */}
-        <div className="w-full max-w-md space-y-6">
+        {/* Action Buttons */}
+        <div className="flex gap-3 mt-6 w-full max-w-xs">
+            <button 
+                onClick={() => setShowSettings(true)}
+                className="flex-1 py-2 bg-zinc-800 rounded-lg text-sm font-medium hover:bg-zinc-700 transition-colors"
+            >
+                Settings
+            </button>
+        </div>
+
+        {/* Edit Username */}
+        <div className="w-full max-w-md space-y-6 mt-8">
             <div>
-                <label className="block text-xs font-bold text-zinc-500 uppercase mb-2 ml-1">Username</label>
+                <label className="block text-xs font-bold text-zinc-500 uppercase mb-2 ml-1">Edit Username</label>
                 <div className="flex gap-2">
                     <input 
                         type="text" 
@@ -70,16 +136,45 @@ export default function ProfileView({ currentUser, onBack }: Props) {
                     />
                     <button 
                         onClick={handleSaveUsername}
-                        disabled={saving || username === currentUser.username}
+                        disabled={saving}
                         className="bg-white text-black px-4 rounded-xl font-bold text-sm disabled:opacity-50"
                     >
-                        {saving ? '...' : 'Save'}
+                        Save
                     </button>
                 </div>
-                <p className="text-[10px] text-zinc-600 mt-2 ml-1">Usernames allow people to find you without your email.</p>
             </div>
 
-            <div className="pt-8 border-t border-zinc-900">
+            {/* Roomer List Management */}
+            <div>
+                <label className="block text-xs font-bold text-zinc-500 uppercase mb-2 ml-1">My Roomers</label>
+                <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl overflow-hidden">
+                    {myRoomers.length === 0 ? (
+                        <div className="p-4 text-center text-zinc-600 text-sm">No active roomers.</div>
+                    ) : (
+                        myRoomers.map(roomer => (
+                            <div key={roomer.uid} className="flex items-center justify-between p-3 border-b border-zinc-800 last:border-0">
+                                <div className="flex items-center gap-3 overflow-hidden">
+                                    <div className="w-8 h-8 rounded-full bg-zinc-700 overflow-hidden shrink-0">
+                                        {roomer.photoURL && <img src={roomer.photoURL} className="w-full h-full object-cover"/>}
+                                    </div>
+                                    <div className="truncate">
+                                        <p className="text-white text-sm truncate">{roomer.displayName}</p>
+                                        <p className="text-zinc-500 text-[10px] truncate">{roomer.email}</p>
+                                    </div>
+                                </div>
+                                <button 
+                                    onClick={() => handleDeleteRoomer(roomer.uid)}
+                                    className="p-2 text-red-500 hover:bg-zinc-800 rounded-full"
+                                >
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                </button>
+                            </div>
+                        ))
+                    )}
+                </div>
+            </div>
+
+            <div className="pt-8 border-t border-zinc-900 pb-10">
                 <button 
                     onClick={handleSignOut}
                     className="w-full py-4 text-red-500 font-medium bg-zinc-900/30 rounded-xl hover:bg-zinc-900 transition-colors"

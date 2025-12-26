@@ -11,6 +11,7 @@ import { UserProfile, AppView, Roomer } from './types';
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [view, setView] = useState<AppView>({ name: 'ROOMS_LIST' });
+  const [isDarkMode, setIsDarkMode] = useState(true);
 
   // Auth Init
   useEffect(() => {
@@ -40,8 +41,6 @@ export default function App() {
       console.log("STAGE 4: onAuthStateChanged event:", currentUser ? currentUser.email : "NULL");
       if (currentUser) {
         setUser(currentUser);
-        // Force sync local profile state from DB if needed, but for now we rely on auth object
-        // And we update DB on login.
       } else {
         setUser(null);
         setView({ name: 'ROOMS_LIST' });
@@ -51,26 +50,26 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Transform Firebase User to local UserProfile type
-  // Note: We might want to fetch the 'username' from DB here to be accurate, 
-  // but for the sake of speed we will pass basic info and let components fetch details.
+  const toggleTheme = () => {
+      setIsDarkMode(!isDarkMode);
+      if (isDarkMode) {
+          document.documentElement.classList.remove('dark');
+      } else {
+          document.documentElement.classList.add('dark');
+      }
+  };
+
   const userProfile: UserProfile | null = user ? {
     uid: user.uid,
     email: user.email,
     displayName: user.displayName,
     photoURL: user.photoURL,
-    // Note: Username isn't on the Auth object, it's in DB. 
-    // ProfileView fetches it, so it's okay if undefined here initially.
   } : null;
 
-  // Navigation Handlers
   const handleNavigateChat = (roomer: Roomer) => {
     if (!user) return;
-    // Generate a consistent Room ID based on both UIDs sorted alphabetically
-    // This ensures User A and User B always share the same room id.
     const participants = [user.uid, roomer.uid].sort();
     const roomId = `${participants[0]}_${participants[1]}`;
-    
     setView({ name: 'CHAT', roomId, recipient: roomer });
   };
 
@@ -82,9 +81,8 @@ export default function App() {
     setView({ name: 'ROOMS_LIST' });
   };
 
-  // Render Logic
   return (
-    <div className="h-[100dvh] w-screen relative flex flex-col bg-black text-white overflow-hidden">
+    <div className={`h-[100dvh] w-screen relative flex flex-col overflow-hidden ${isDarkMode ? 'bg-black text-white' : 'bg-gray-100 text-black'}`}>
       <DebugConsole />
       
       <div className="flex-1 w-full h-full relative z-10">
@@ -113,6 +111,8 @@ export default function App() {
               <ProfileView 
                 currentUser={userProfile}
                 onBack={handleBackToRooms}
+                toggleTheme={toggleTheme}
+                isDarkMode={isDarkMode}
               />
             )}
           </>
