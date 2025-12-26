@@ -3,6 +3,7 @@ export interface UserProfile {
   email: string | null;
   displayName: string | null;
   photoURL: string | null;
+  username?: string; // e.g. $OnyxMaster
   fcmToken?: string;
   lastOnline?: number;
 }
@@ -15,22 +16,16 @@ export interface Message {
   timestamp: number;
 }
 
-export interface Room {
-  id: string;
-  name: string;
-  lastMessage?: string;
-  lastMessageTimestamp?: number;
-  participants: Record<string, boolean>; // uid: true
-  avatar?: string;
+// Simplified Roomer (Contact) interface
+export interface Roomer {
+  uid: string;
+  displayName: string;
+  photoURL: string | null;
+  username: string | null;
+  email: string | null;
 }
 
-export interface ChatState {
-  activeRoomId: string | null;
-}
-
-export enum AppScreen {
-  LOGIN = 'LOGIN',
-  ROOMS = 'ROOMS',
-  CHAT = 'CHAT',
-  PROFILE = 'PROFILE'
-}
+export type AppView = 
+  | { name: 'ROOMS_LIST' }
+  | { name: 'CHAT'; roomId: string; recipient: Roomer }
+  | { name: 'PROFILE' };

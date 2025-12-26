@@ -1,15 +1,16 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { ref, push, onValue, serverTimestamp } from 'firebase/database';
 import { db } from '../services/firebase';
-import { Message, UserProfile } from '../types';
+import { Message, UserProfile, Roomer } from '../types';
 
 interface ChatViewProps {
   roomId: string;
+  recipient: Roomer;
   currentUser: UserProfile;
   onBack: () => void;
 }
 
-const ChatView: React.FC<ChatViewProps> = ({ roomId, currentUser, onBack }) => {
+const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onBack }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -40,7 +41,7 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, currentUser, onBack }) => {
     e.preventDefault();
     if (!inputText.trim()) return;
 
-    const messageContent = inputText; // Capture text before clearing
+    const messageContent = inputText;
     const messagesRef = ref(db, `rooms/${roomId}/messages`);
     
     // 1. Save to Firebase
@@ -51,21 +52,14 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, currentUser, onBack }) => {
       timestamp: serverTimestamp()
     });
 
-    // 2. Trigger Instant Notification via Google Apps Script
-    // We use no-cors to prevent browser errors, as we don't need to read the response.
+    // 2. Trigger Instant Notification via Google Apps Script (Optional)
     const GAS_URL = "https://script.google.com/macros/s/AKfycbzi-1KXALb-CqR2iDAFHiJcXs6P6cnHgRmP_-Kzdgktz0xkhWLfIdott8fGHBVByrfkag/exec";
-    
     try {
         fetch(GAS_URL, {
             method: 'POST',
             mode: 'no-cors',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                text: messageContent,
-                sender: currentUser.displayName || 'User'
-            })
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: messageContent, sender: currentUser.displayName || 'User' })
         });
     } catch (err) {
         console.warn("Failed to trigger notification:", err);
@@ -77,16 +71,21 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, currentUser, onBack }) => {
   return (
     <div className="flex flex-col h-full w-full bg-background fixed inset-0 z-20">
       {/* Header */}
-      <div className="flex items-center px-4 py-3 border-b border-border bg-background/90 backdrop-blur-md pt-safe-top">
+      <div className="flex items-center px-2 py-3 border-b border-border bg-background/90 backdrop-blur-md pt-safe-top">
         <button 
           onClick={onBack}
-          className="p-2 -ml-2 text-white active:opacity-50"
+          className="flex items-center text-blue-500 px-2 py-1 active:opacity-50"
         >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-6 h-6 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
+          <span className="text-[17px]">Rooms</span>
         </button>
-        <span className="ml-2 font-semibold text-lg">Room {roomId === 'general' ? 'General' : roomId}</span>
+        
+        <div className="flex-1 flex flex-col items-center justify-center mr-10">
+            <span className="font-semibold text-[17px]">{recipient.displayName}</span>
+            <span className="text-[10px] text-zinc-500">{recipient.username || recipient.email}</span>
+        </div>
       </div>
 
       {/* Messages */}
@@ -102,7 +101,6 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, currentUser, onBack }) => {
                     : 'bg-zinc-800 text-zinc-100 rounded-tl-sm'
                 }`}
               >
-                {!isMe && <p className="text-[10px] text-zinc-400 mb-1 font-bold">{msg.senderName}</p>}
                 {msg.text}
               </div>
             </div>

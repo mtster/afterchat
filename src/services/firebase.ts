@@ -3,11 +3,20 @@ import {
   getAuth, 
   GoogleAuthProvider,
   setPersistence,
-  browserLocalPersistence,
-  indexedDBLocalPersistence
+  browserLocalPersistence
 } from "firebase/auth";
-import { getDatabase, ref, update } from "firebase/database";
+import { 
+  getDatabase, 
+  ref, 
+  update, 
+  get, 
+  child, 
+  query, 
+  orderByChild, 
+  equalTo 
+} from "firebase/database";
 import { getMessaging, isSupported } from "firebase/messaging";
+import { UserProfile, Roomer } from "../types";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -21,17 +30,10 @@ const firebaseConfig = {
 
 // Singleton init
 export const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-
-// Initialize Auth
 export const auth = getAuth(app);
-
-// Initialize Database
 export const db = getDatabase(app);
-
-// Initialize Provider
 export const googleProvider = new GoogleAuthProvider();
 
-// Initialize Messaging (Async)
 export const messaging = async () => {
   try {
     const supported = await isSupported();
@@ -42,23 +44,67 @@ export const messaging = async () => {
   }
 };
 
-// Helper to set persistence immediately
-// This helps prevent 'Split Brain' issues on iOS/PWA refreshes
-setPersistence(auth, browserLocalPersistence)
-  .then(() => {
-    console.log("Firebase Persistence set to browserLocalPersistence");
-  })
-  .catch((error) => {
-    console.error("Firebase Persistence Error:", error);
-  });
+setPersistence(auth, browserLocalPersistence).catch(console.error);
 
-// --- User Profile Helper ---
-export const updateUserProfile = async (uid: string, data: any) => {
+// --- User Management ---
+
+export const updateUserProfile = async (uid: string, data: Partial<UserProfile>) => {
   try {
     const userRef = ref(db, `users/${uid}`);
     await update(userRef, data);
-    console.log("User profile updated in DB");
   } catch (e) {
     console.error("Failed to update user profile", e);
+    throw e;
   }
+};
+
+export const findUserByEmailOrUsername = async (searchTerm: string): Promise<Roomer | null> => {
+  const usersRef = ref(db, 'users');
+  
+  // 1. Try Email
+  let q = query(usersRef, orderByChild('email'), equalTo(searchTerm));
+  let snapshot = await get(q);
+  
+  // 2. Try Username if email failed
+  if (!snapshot.exists()) {
+    q = query(usersRef, orderByChild('username'), equalTo(searchTerm));
+    snapshot = await get(q);
+  }
+
+  if (snapshot.exists()) {
+    const uid = Object.keys(snapshot.val())[0];
+    const userData = snapshot.val()[uid];
+    return {
+      uid,
+      displayName: userData.displayName || 'Unknown',
+      photoURL: userData.photoURL || null,
+      username: userData.username || null,
+      email: userData.email || null
+    };
+  }
+  return null;
+};
+
+export const addRoomerToUser = async (currentUid: string, targetUid: string) => {
+  // Add targetUid to currentUid's roomers list
+  const updates: any = {};
+  updates[`users/${currentUid}/roomers/${targetUid}`] = true;
+  // Optional: Add currentUid to targetUid's roomers list (mutual) - removing for now to keep it unidirectional like a contact book, 
+  // but usually chat apps are bidirectional. Let's stick to unidirectional for simplicity of permissions.
+  await update(ref(db), updates);
+};
+
+export const getRoomerDetails = async (uid: string): Promise<Roomer | null> => {
+  const snapshot = await get(child(ref(db), `users/${uid}`));
+  if (snapshot.exists()) {
+    const val = snapshot.val();
+    return {
+      uid,
+      displayName: val.displayName || 'Unknown',
+      photoURL: val.photoURL || null,
+      username: val.username || null,
+      email: val.email || null
+    };
+  }
+  return null;
 };
