@@ -1,21 +1,42 @@
 import React from 'react';
-import { loginWithGoogle, updateUserProfile } from '../services/firebase';
+import { signInWithPopup, signInWithRedirect } from 'firebase/auth';
+import { auth, googleProvider, updateUserProfile } from '../services/firebase';
 
 const Login: React.FC = () => {
+  
   const handleLogin = async () => {
+    console.log("[Login] Button Clicked");
     try {
-      const user = await loginWithGoogle();
-      // Ensure user exists in DB
-      if (user) {
-        updateUserProfile(user.uid, {
-          email: user.email,
-          displayName: user.displayName,
-          photoURL: user.photoURL,
-          lastOnline: Date.now()
-        });
+      // Check Environment
+      const isIOSStandalone = (window.navigator as any).standalone === true;
+      const isStandalone = window.matchMedia('(display-mode: standalone)').matches || isIOSStandalone;
+      
+      console.log("[Login] Env Check:", { isStandalone, isIOSStandalone });
+
+      if (isStandalone) {
+        console.log("[Login] Attempting Redirect (Standalone)");
+        // FIX: Must pass 'auth' as first argument
+        await signInWithRedirect(auth, googleProvider);
+      } else {
+        console.log("[Login] Attempting Popup (Browser)");
+        // FIX: Must pass 'auth' as first argument
+        const result = await signInWithPopup(auth, googleProvider);
+        const user = result.user;
+        
+        console.log("[Login] Popup Success:", user.email);
+        
+        if (user) {
+          updateUserProfile(user.uid, {
+            email: user.email,
+            displayName: user.displayName,
+            photoURL: user.photoURL,
+            lastOnline: Date.now()
+          });
+        }
       }
-    } catch (error) {
-      console.error("Login failed", error);
+    } catch (error: any) {
+      console.error("[Login] CRITICAL FAILURE:", error.code, error.message);
+      alert(`Login Failed: ${error.message}`);
     }
   };
 

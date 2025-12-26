@@ -15,7 +15,9 @@ export default function App() {
     const initAuth = async () => {
         console.log("STAGE 2: Checking getRedirectResult...");
         try {
+            // FIX: Must pass 'auth' as first argument
             const result = await getRedirectResult(auth);
+            
             if (result) {
                 console.log("STAGE 3 [SUCCESS]: Redirect Result Found for", result.user.email);
                 setUser(result.user);
@@ -35,6 +37,7 @@ export default function App() {
 
     initAuth();
 
+    // FIX: auth is already correctly passed here
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       console.log("STAGE 4: onAuthStateChanged event:", currentUser ? currentUser.email : "NULL");
       if (currentUser) {

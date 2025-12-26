@@ -1,14 +1,13 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { 
-  initializeAuth, 
-  indexedDBLocalPersistence, 
-  browserLocalPersistence, 
-  GoogleAuthProvider, 
-  signInWithPopup, 
-  signInWithRedirect 
+  getAuth, 
+  GoogleAuthProvider,
+  setPersistence,
+  browserLocalPersistence,
+  indexedDBLocalPersistence
 } from "firebase/auth";
 import { getDatabase, ref, update } from "firebase/database";
-import { getMessaging, isSupported, getToken, onMessage } from "firebase/messaging";
+import { getMessaging, isSupported } from "firebase/messaging";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -20,23 +19,19 @@ const firebaseConfig = {
   databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL
 };
 
-// Check config
-if (!firebaseConfig.apiKey) {
-  console.error("CRITICAL: Firebase API Key missing.");
-}
-
 // Singleton init
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+export const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-// 1. Explicit Persistence
-// 'browserLocalPersistence' is crucial for iOS PWA survival across reloads/redirects
-export const auth = initializeAuth(app, {
-  persistence: [indexedDBLocalPersistence, browserLocalPersistence]
-});
+// Initialize Auth
+export const auth = getAuth(app);
 
+// Initialize Database
 export const db = getDatabase(app);
+
+// Initialize Provider
 export const googleProvider = new GoogleAuthProvider();
 
+// Initialize Messaging (Async)
 export const messaging = async () => {
   try {
     const supported = await isSupported();
@@ -47,61 +42,23 @@ export const messaging = async () => {
   }
 };
 
-// --- Helpers ---
-
-export const loginWithGoogle = async () => {
-  console.log("[Auth] loginWithGoogle triggered.");
-  try {
-    const isIOSStandalone = (window.navigator as any).standalone === true;
-    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || isIOSStandalone;
-    
-    console.log("[Auth] Environment:", { isStandalone, isIOSStandalone });
-
-    if (isStandalone) {
-      console.log("[Auth] Using signInWithRedirect (Standalone Mode)");
-      await signInWithRedirect(auth, googleProvider);
-      return null;
-    } else {
-      console.log("[Auth] Using signInWithPopup (Browser Mode)");
-      const result = await signInWithPopup(auth, googleProvider);
-      return result.user;
-    }
-  } catch (error) {
-    console.error("[Auth] Login Error:", error);
-    throw error;
-  }
-};
-
-export const updateUserProfile = async (uid: string, data: any) => {
-  const userRef = ref(db, `users/${uid}`);
-  await update(userRef, data);
-};
-
-export const requestNotificationPermission = async (uid: string) => {
-  try {
-    const msg = await messaging();
-    if (!msg) return null;
-
-    const permission = await Notification.requestPermission();
-    if (permission === 'granted') {
-      const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY;
-      const token = await getToken(msg, { vapidKey });
-      if (token) {
-        await updateUserProfile(uid, { fcmToken: token });
-        return token;
-      }
-    }
-  } catch (error) {
-    console.error('Error requesting notification permission:', error);
-  }
-  return null;
-};
-
-export const onMessageListener = () =>
-  new Promise(async (resolve) => {
-    const msg = await messaging();
-    if (!msg) return;
-    onMessage(msg, (payload) => {
-      resolve(payload);
-    });
+// Helper to set persistence immediately
+// This helps prevent 'Split Brain' issues on iOS/PWA refreshes
+setPersistence(auth, browserLocalPersistence)
+  .then(() => {
+    console.log("Firebase Persistence set to browserLocalPersistence");
+  })
+  .catch((error) => {
+    console.error("Firebase Persistence Error:", error);
   });
+
+// --- User Profile Helper ---
+export const updateUserProfile = async (uid: string, data: any) => {
+  try {
+    const userRef = ref(db, `users/${uid}`);
+    await update(userRef, data);
+    console.log("User profile updated in DB");
+  } catch (e) {
+    console.error("Failed to update user profile", e);
+  }
+};
