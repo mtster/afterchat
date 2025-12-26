@@ -18,12 +18,26 @@ export default function App() {
   useEffect(() => {
     let unsubscribe: () => void;
 
+    // Detect Standalone Mode
+    const isIOSStandalone = (window.navigator as any).standalone === true;
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || isIOSStandalone;
+
     // --- AGGRESSIVE HANDSHAKE FUNCTION ---
     const runHandshake = async () => {
-        const isPending = localStorage.getItem('onyx_auth_redirect_pending') === 'true';
-        if (!isPending) {
-            console.log("[Handshake] No pending redirect flag found.");
+        // Check both storages
+        const localPending = localStorage.getItem('onyx_auth_redirect_pending') === 'true';
+        const sessionPending = sessionStorage.getItem('onyx_auth_redirect_pending') === 'true';
+        
+        // Fail-safe: If standalone, always check, even if flags are missing (iOS wipes storage often)
+        const shouldCheck = localPending || sessionPending || isStandalone;
+
+        if (!shouldCheck) {
+            console.log("[Handshake] No pending redirect flag found and not standalone.");
             return;
+        }
+
+        if (isStandalone && !localPending && !sessionPending) {
+            console.log("[Handshake] Standalone Fail-safe Triggered (No flags found)");
         }
 
         console.log("[Handshake] Starting aggressive check...");
@@ -34,10 +48,11 @@ export default function App() {
                 console.log(`[Handshake] Attempt ${i}/3`);
                 const result = await getRedirectResult(auth);
                 if (result?.user) {
-                    console.log("[Handshake] SUCCESS: User retrieved:", result.user.email);
+                    console.log(`[Handshake] Redirect Result Received: ${result.user.email}`);
                     
-                    // Cleanup Flag
+                    // Cleanup Flags
                     localStorage.removeItem('onyx_auth_redirect_pending');
+                    sessionStorage.removeItem('onyx_auth_redirect_pending');
                     
                     // Set User
                     setUser(result.user);
@@ -52,7 +67,7 @@ export default function App() {
                     });
                     return; // Handshake complete
                 } else {
-                     console.log(`[Handshake] Attempt ${i}: No result returned.`);
+                     console.log(`[Handshake] Attempt ${i}: Redirect Result: Null.`);
                 }
             } catch (e: any) {
                 console.error(`[Handshake] Error attempt ${i}:`, e.code, e.message);
@@ -62,15 +77,12 @@ export default function App() {
         }
 
         // Exhausted
-        console.log("[Handshake] Exhausted all attempts. Clearing flag.");
+        console.log("[Handshake] Exhausted all attempts. Clearing flags.");
         localStorage.removeItem('onyx_auth_redirect_pending');
+        sessionStorage.removeItem('onyx_auth_redirect_pending');
         
-        // If we are still loading and no user found, release the loading state
-        // (Only if onAuthStateChanged hasn't already handled it)
-        if (!auth.currentUser) {
-            console.log("[Handshake] No user found after exhaustion. Releasing load state.");
-            setLoadingAuth(false);
-        }
+        // NOTE: We do NOT force setLoadingAuth(false) here immediately if standalone,
+        // we let onAuthStateChanged's grace period handle the final verdict.
     };
 
     const initAuth = async () => {
@@ -79,28 +91,37 @@ export default function App() {
             await setPersistence(auth, browserLocalPersistence);
             
             // Run handshake immediately on mount
-            await runHandshake();
+            // We do NOT await this, let it run in parallel with the listener
+            runHandshake();
 
             // 3. Attach Listener
             unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-                const isPending = localStorage.getItem('onyx_auth_redirect_pending') === 'true';
-                
-                console.log("STAGE 3: Auth State Changed:", currentUser ? currentUser.email : "NULL", `Pending: ${isPending}`);
+                console.log("STAGE 3: Auth State Changed:", currentUser ? currentUser.email : "NULL");
                 
                 if (currentUser) {
                     // Success case
                     localStorage.removeItem('onyx_auth_redirect_pending');
+                    sessionStorage.removeItem('onyx_auth_redirect_pending');
                     setUser(currentUser);
                     setLoadingAuth(false);
                 } else {
                     // No user in Auth State
-                    if (isPending) {
-                        console.log("[AuthGuard] User is null but Pending Flag is TRUE. Waiting for Handshake...");
-                        // Do NOT set user to null yet. Wait for handshake logic to finish and clear the flag.
-                        // We trigger handshake again just in case.
-                        runHandshake();
+                    // Grace Period for Standalone
+                    if (isStandalone) {
+                        console.log("[AuthGuard] User null in Standalone. Initiating Grace Period (2s)...");
+                        setTimeout(() => {
+                            // Re-check auth.currentUser directly to see if handshake succeeded in the meantime
+                            if (!auth.currentUser) {
+                                console.log("[AuthGuard] Grace Period Over. Still no user. Showing Login.");
+                                setUser(null);
+                                setLoadingAuth(false);
+                                setView({ name: 'ROOMS_LIST' });
+                            } else {
+                                console.log("[AuthGuard] Grace Period Over. User found! (Handshake success)");
+                            }
+                        }, 2000);
                     } else {
-                        // Truly logged out
+                        // Browser mode - fail fast
                         setUser(null);
                         setLoadingAuth(false);
                         setView({ name: 'ROOMS_LIST' });

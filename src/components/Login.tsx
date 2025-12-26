@@ -19,8 +19,11 @@ const Login: React.FC = () => {
 
       if (isStandalone) {
         console.log("[Login] Attempting Redirect (Standalone)");
-        // FLAG: Set pending state so App.tsx knows to wait for the result
+        // FLAG: Set pending state in BOTH storages for redundancy on iOS
         localStorage.setItem('onyx_auth_redirect_pending', 'true');
+        sessionStorage.setItem('onyx_auth_redirect_pending', 'true');
+        console.log("[Login] Redirect Flags Set (Local + Session)");
+        
         await signInWithRedirect(auth, googleProvider);
       } else {
         console.log("[Login] Attempting Popup (Browser)");
@@ -42,6 +45,7 @@ const Login: React.FC = () => {
       console.error("[Login] CRITICAL FAILURE:", error.code, error.message);
       // Clean up flag if error occurs
       localStorage.removeItem('onyx_auth_redirect_pending');
+      sessionStorage.removeItem('onyx_auth_redirect_pending');
       
       let errorMessage = `Login Failed: ${error.message}`;
 
