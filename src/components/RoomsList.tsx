@@ -20,16 +20,12 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
   const [searchError, setSearchError] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // 1. Listen for roomers (Added Users + Pending Approvals)
   useEffect(() => {
     const userRef = ref(db, `users/${currentUser.uid}`);
-    
     const unsub = onValue(userRef, async (snapshot) => {
       const data = snapshot.val();
       const allRoomers: Roomer[] = [];
-
       if (data) {
-        // A. Process "addedUsers" (People I added)
         if (data.addedUsers) {
              const addedUids = Object.keys(data.addedUsers);
              const addedDetails = await Promise.all(addedUids.map(async (uid) => {
@@ -39,15 +35,12 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
              }));
              allRoomers.push(...addedDetails.filter(r => r !== null) as Roomer[]);
         }
-
-        // B. Process "pendingApprovals" (People who added me)
         if (data.pendingApprovals) {
             const pendingUids = Object.keys(data.pendingApprovals);
             const pendingDetails = await Promise.all(pendingUids.map(uid => getRoomerDetails(uid, 'pending_incoming')));
             allRoomers.push(...pendingDetails.filter(r => r !== null) as Roomer[]);
         }
       }
-      
       const unique = Array.from(new Map(allRoomers.map(item => [item.uid, item])).values());
       setRoomers(unique);
       setLoading(false);
@@ -55,7 +48,6 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
     return () => unsub();
   }, [currentUser.uid]);
 
-  // Search Logic
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     setSearchError('');
@@ -80,7 +72,6 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
         setSearchError('User not found.');
       }
     } catch (err: any) {
-      console.error("Search Error:", err);
       setSearchError(err.code === 'PERMISSION_DENIED' ? "Access Denied: Check DB Rules" : "Search failed.");
     }
   };
@@ -94,43 +85,30 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
       setSearchTerm('');
       setSearchResult(null);
     } catch (err: any) {
-      console.error("Add Roomer Error:", err);
-      // Explicit error handling for user feedback
-      let msg = "Could not add user.";
-      if (err.code === 'PERMISSION_DENIED') {
-          msg = "Permission Denied. DB Rules prevent adding.";
-      }
-      alert(`${msg}\nCode: ${err.code || 'UNKNOWN'}`);
+      alert(`Could not add user.\nCode: ${err.code || 'UNKNOWN'}`);
     }
     setIsProcessing(false);
   };
 
   const handleApprove = async (e: React.MouseEvent, uid: string) => {
       e.stopPropagation();
-      try {
-        await approveRoomer(currentUser.uid, uid);
-      } catch (err: any) {
-          console.error("Approve Error:", err);
-          alert(`Failed to approve: ${err.code}`);
-      }
+      await approveRoomer(currentUser.uid, uid);
   };
 
   const handleReject = async (e: React.MouseEvent, uid: string) => {
       e.stopPropagation();
       if(window.confirm("Reject this request?")) {
-        try {
-            await deleteRoomer(currentUser.uid, uid);
-        } catch (err: any) {
-            console.error("Reject Error:", err);
-            alert(`Failed to reject: ${err.code}`);
-        }
+        await deleteRoomer(currentUser.uid, uid);
       }
   };
 
   return (
-    <div className="flex flex-col h-full w-full bg-background">
+    <div 
+        className="flex flex-col w-full bg-background overflow-hidden"
+        style={{ height: 'var(--app-height, 100dvh)' }}
+    >
       {/* Header */}
-      <div className="pt-safe-top px-4 pb-3 flex items-center justify-between bg-zinc-900/50 backdrop-blur-md border-b border-zinc-800">
+      <div className="flex-none pt-safe-top px-4 pb-3 flex items-center justify-between bg-zinc-900/50 backdrop-blur-md border-b border-zinc-800 z-10">
         <h1 className="text-2xl font-bold text-white tracking-tight">Rooms</h1>
         
         <div className="flex items-center gap-3">
@@ -159,11 +137,11 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
       </div>
 
       {/* Body */}
-      <div className="flex-1 overflow-y-auto no-scrollbar p-4">
+      <div className="flex-1 overflow-y-auto no-scrollbar p-4 pb-safe-bottom">
         {loading ? (
            <div className="flex justify-center mt-10 text-zinc-600 text-sm">Loading...</div>
         ) : roomers.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-[60vh] text-center px-6">
+          <div className="flex flex-col items-center justify-center h-[60%] text-center px-6">
             <div className="w-16 h-16 bg-zinc-900 rounded-full flex items-center justify-center mb-4">
                 <svg className="w-8 h-8 text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
             </div>
@@ -181,7 +159,6 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
             {roomers.map(roomer => {
                 const isPending = roomer.status === 'pending_incoming' || roomer.status === 'pending_outgoing';
                 const isIncoming = roomer.status === 'pending_incoming';
-
                 return (
                   <button
                     key={roomer.uid}
@@ -197,7 +174,6 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
                         </div>
                       )}
                     </div>
-                    
                     <div className="flex-1 text-left min-w-0">
                       <div className="flex justify-between items-baseline">
                         <h3 className={`font-medium truncate ${isPending ? 'text-zinc-400' : 'text-white'}`}>{roomer.displayName}</h3>
@@ -206,7 +182,6 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
                         {isIncoming ? 'Pending Request' : (roomer.status === 'pending_outgoing' ? 'Sent Request' : (roomer.username || roomer.email))}
                       </p>
                     </div>
-
                     {isIncoming && (
                         <div className="flex gap-2">
                             <div 
@@ -233,7 +208,6 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
           <div className="w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-2xl">
             <h2 className="text-lg font-semibold text-white mb-4">Add Roomer</h2>
-            
             <form onSubmit={handleSearch} className="mb-4">
                <input
                   type="text"
@@ -244,47 +218,25 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
                   autoFocus
                 />
             </form>
-
             {searchError && <p className="text-red-400 text-sm mb-4 text-center">{searchError}</p>}
-            
             {searchResult && (
               <div className="bg-black/50 rounded-xl p-3 flex items-center gap-3 mb-4 border border-zinc-800">
                 <div className="w-10 h-10 rounded-full bg-zinc-800 overflow-hidden">
                     {searchResult.photoURL ? (
                         <img src={searchResult.photoURL} alt="" className="w-full h-full object-cover" />
                     ) : (
-                        <div className="w-full h-full flex items-center justify-center text-zinc-500">
-                             <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" /></svg>
-                        </div>
+                        <div className="w-full h-full flex items-center justify-center text-zinc-500 bg-zinc-800">?</div>
                     )}
                 </div>
-                <div className="flex-1 min-w-0">
-                    <p className="text-white text-sm font-medium truncate">{searchResult.displayName}</p>
-                    <p className="text-zinc-500 text-xs truncate">{searchResult.username || searchResult.email}</p>
+                <div className="overflow-hidden flex-1">
+                    <p className="text-white font-medium truncate">{searchResult.displayName}</p>
+                    <p className="text-zinc-500 text-xs truncate">{searchResult.email}</p>
                 </div>
-                <button 
-                    onClick={handleAddUser}
-                    disabled={isProcessing}
-                    className="bg-white text-black text-xs font-bold px-3 py-1.5 rounded-full"
-                >
-                    ADD
-                </button>
               </div>
             )}
-
-            <div className="flex gap-3 pt-2">
-                <button 
-                    onClick={() => { setShowAddModal(false); setSearchTerm(''); setSearchResult(null); setSearchError(''); }}
-                    className="flex-1 py-3 text-zinc-400 text-sm hover:text-white bg-zinc-800 rounded-xl transition-colors"
-                >
-                    Cancel
-                </button>
-                 <button 
-                    onClick={handleSearch}
-                    className="flex-1 py-3 bg-white text-black font-bold text-sm rounded-xl active:scale-95 transition-transform"
-                 >
-                    Search
-                 </button>
+            <div className="flex gap-3">
+                <button onClick={() => {setShowAddModal(false); setSearchTerm(''); setSearchResult(null);}} className="flex-1 py-3 text-sm font-medium text-zinc-400 bg-zinc-800 rounded-xl">Cancel</button>
+                <button onClick={handleAddUser} disabled={!searchResult || isProcessing} className="flex-1 py-3 text-sm font-medium text-black bg-white rounded-xl disabled:opacity-50">Add</button>
             </div>
           </div>
         </div>

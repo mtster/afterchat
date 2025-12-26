@@ -15,21 +15,23 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
   const [inputText, setInputText] = useState('');
   const [isVisible, setIsVisible] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   
   // Status Logic
   const isPendingOutgoing = recipient.status === 'pending_outgoing';
   const isPendingIncoming = recipient.status === 'pending_incoming';
   const isAccepted = recipient.status === 'accepted';
-  const isBlocked = !isAccepted && !isPendingOutgoing && !isPendingIncoming; // Fallback if status lost
+  const isBlocked = !isAccepted && !isPendingOutgoing && !isPendingIncoming;
 
   // Animation Mount
   useEffect(() => {
-    setTimeout(() => setIsVisible(true), 10);
+    const timer = setTimeout(() => setIsVisible(true), 10);
+    return () => clearTimeout(timer);
   }, []);
 
   const handleBack = () => {
     setIsVisible(false);
-    setTimeout(onBack, 300); // Wait for animation to finish
+    setTimeout(onBack, 300);
   };
 
   useEffect(() => {
@@ -51,34 +53,42 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
   }, [roomId]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Scroll to bottom
+    if (bottomRef.current) {
+        bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages]);
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputText.trim()) return;
-    if (!isAccepted) return; // Prevent sending if not accepted
+    const text = inputText.trim();
+    if (!text || !isAccepted) return;
 
-    const messageContent = inputText;
-    const messagesRef = ref(db, `rooms/${roomId}/messages`);
+    // 1. Clear input
+    setInputText('');
     
+    // 2. Refocus aggressively to keep keyboard up
+    if (inputRef.current) {
+        inputRef.current.focus();
+    }
+
+    // 3. Send
+    const messagesRef = ref(db, `rooms/${roomId}/messages`);
     await push(messagesRef, {
       senderId: currentUser.uid,
       senderName: currentUser.displayName || 'User',
-      text: messageContent,
+      text: text,
       timestamp: serverTimestamp()
     });
-
-    setInputText('');
   };
 
   return (
     <div 
-        className={`flex flex-col h-full w-full bg-background fixed inset-0 z-20 transition-transform duration-300 ease-in-out ${isVisible ? 'translate-x-0' : 'translate-x-full'}`}
+        className={`flex flex-col w-screen bg-background fixed inset-0 z-20 transition-transform duration-300 ease-in-out ${isVisible ? 'translate-x-0' : 'translate-x-full'}`}
+        style={{ height: 'var(--app-height, 100dvh)' }}
     >
-      {/* Header */}
-      <div className="grid grid-cols-6 items-center px-4 py-3 border-b border-border bg-background/90 backdrop-blur-md pt-safe-top">
-        {/* Left: Back Arrow */}
+      {/* Header - Sticky with Safe Area */}
+      <div className="flex-none grid grid-cols-6 items-center px-4 py-3 border-b border-border bg-background/90 backdrop-blur-md pt-safe-top z-30">
         <button 
           onClick={handleBack}
           className="col-span-1 justify-self-start text-white p-2 -ml-2 active:opacity-50"
@@ -88,23 +98,21 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
           </svg>
         </button>
         
-        {/* Center: Name */}
         <div className="col-span-4 flex flex-col items-center justify-center">
             <span className="font-semibold text-[17px] text-white truncate max-w-[200px]">{recipient.displayName}</span>
         </div>
 
-        {/* Right: Empty */}
         <div className="col-span-1" />
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar">
+      {/* Messages Area - Flex Grow */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar bg-background w-full">
         {messages.map((msg) => {
           const isMe = msg.senderId === currentUser.uid;
           return (
             <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
               <div 
-                className={`max-w-[75%] px-4 py-2 rounded-2xl text-[15px] leading-snug ${
+                className={`max-w-[75%] px-4 py-2 rounded-2xl text-[15px] leading-snug break-words ${
                   isMe 
                     ? 'bg-blue-600 text-white rounded-tr-sm' 
                     : 'bg-zinc-800 text-zinc-100 rounded-tl-sm'
@@ -115,11 +123,11 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
             </div>
           );
         })}
-        <div ref={bottomRef} />
+        <div ref={bottomRef} className="h-4" />
       </div>
 
-      {/* Input or Status Message */}
-      <div className="p-3 bg-zinc-900 border-t border-border pb-safe-bottom">
+      {/* Input Area - Fixed Bottom Logic */}
+      <div className="flex-none p-3 bg-zinc-900 border-t border-border pb-safe-bottom z-30 w-full">
         {!isAccepted ? (
             <div className="w-full py-3 text-center text-zinc-400 text-sm font-medium bg-zinc-950/50 rounded-lg border border-zinc-800">
                 {isPendingOutgoing && `Waiting for ${recipient.displayName} to accept.`}
@@ -127,18 +135,25 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
                 {isBlocked && `This roomer has removed you.`}
             </div>
         ) : (
-            <form onSubmit={handleSend} className="flex gap-2">
+            <form onSubmit={handleSend} className="flex gap-2 items-center">
             <input
+                ref={inputRef}
                 type="text"
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 placeholder="Message"
                 className="flex-1 bg-black border border-zinc-700 rounded-full px-4 py-2 text-white placeholder-zinc-500 focus:outline-none focus:border-blue-500 transition-colors"
+                autoComplete="off"
+                // IMPORTANT: Prevents layout jumping on iOS
+                enterKeyHint="send"
             />
             <button 
                 type="submit"
                 disabled={!inputText.trim()}
-                className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
+                // VITAL: Prevent default on click/touch to prevent button from stealing focus from input
+                onMouseDown={(e) => e.preventDefault()}
+                onTouchStart={(e) => e.preventDefault()}
+                className={`w-10 h-10 rounded-full flex items-center justify-center transition-all flex-shrink-0 ${
                 inputText.trim() ? 'bg-blue-600 text-white active:scale-95' : 'bg-zinc-800 text-zinc-500'
                 }`}
             >

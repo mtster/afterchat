@@ -14,7 +14,33 @@ export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [loadingAuth, setLoadingAuth] = useState(true);
 
-  // Auth Init & Hydration
+  // 1. Dynamic Viewport Height (Critical for iOS Keyboard)
+  useEffect(() => {
+    const setViewportHeight = () => {
+       const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+       document.documentElement.style.setProperty('--app-height', `${vh}px`);
+    };
+    
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', setViewportHeight);
+        // Sometimes scroll events affect viewport in older iOS versions
+        window.visualViewport.addEventListener('scroll', setViewportHeight); 
+    }
+    window.addEventListener('resize', setViewportHeight);
+    
+    // Initial Call
+    setViewportHeight();
+    
+    return () => {
+       if (window.visualViewport) {
+           window.visualViewport.removeEventListener('resize', setViewportHeight);
+           window.visualViewport.removeEventListener('scroll', setViewportHeight);
+       }
+       window.removeEventListener('resize', setViewportHeight);
+    };
+  }, []);
+
+  // 2. Auth Init & Hydration
   useEffect(() => {
     let unsubscribe: () => void;
 
@@ -23,30 +49,26 @@ export default function App() {
             console.log("STAGE 1: Init Auth - Setting Persistence");
             await setPersistence(auth, browserLocalPersistence);
             
-            // 2. Check Redirect Result (Standard check for returning from OAuth)
+            // Check Redirect Result (Standard check for returning from OAuth)
             try {
                 const result = await getRedirectResult(auth);
                 if (result?.user) {
                     console.log("[Auth] Redirect Success:", result.user.email);
                     setUser(result.user);
-                    // Sync Profile immediately
                     updateUserProfile(result.user.uid, {
                         email: result.user.email,
                         displayName: result.user.displayName,
                         photoURL: result.user.photoURL,
                         lastOnline: Date.now()
                     });
-                } else {
-                    console.log("[Auth] No Redirect Result found.");
                 }
             } catch (e: any) {
                 console.error("[Auth] Redirect Error:", e.code, e.message);
             }
 
-            // 3. Attach Listener
+            // Attach Listener
             unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
                 console.log("STAGE 3: Auth State Changed:", currentUser ? currentUser.email : "NULL");
-                
                 if (currentUser) {
                     setUser(currentUser);
                     setLoadingAuth(false);
@@ -110,10 +132,14 @@ export default function App() {
   }
 
   return (
-    <div className={`h-[100dvh] w-screen relative flex flex-col overflow-hidden ${isDarkMode ? 'bg-black text-white' : 'bg-gray-100 text-black'}`}>
+    // Use the CSS variable for height to match the Visual Viewport exactly
+    <div 
+        className={`w-screen relative flex flex-col overflow-hidden ${isDarkMode ? 'bg-black text-white' : 'bg-gray-100 text-black'}`}
+        style={{ height: 'var(--app-height, 100dvh)' }}
+    >
       <DebugConsole />
       
-      <div className="flex-1 w-full h-full relative z-10">
+      <div className="flex-1 w-full h-full relative z-10 flex flex-col">
         {!userProfile ? (
           <Login />
         ) : (

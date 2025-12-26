@@ -10,19 +10,28 @@
   --sab: env(safe-area-inset-bottom);
   --sal: env(safe-area-inset-left);
   --sar: env(safe-area-inset-right);
+  
+  /* Dynamic Height Variable (updated via App.tsx) */
+  --app-height: 100dvh;
 }
 
-html, body {
+html {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  overscroll-behavior: none; /* Prevents rubber-banding */
+}
+
+body {
   height: 100%;
   width: 100%;
   margin: 0;
   padding: 0;
-  overflow: hidden; /* Prevent elastic scrolling on body */
+  overflow: hidden; 
+  overscroll-behavior: none;
   background-color: #000000;
   -webkit-font-smoothing: antialiased;
-}
-
-body {
+  
   /* Prevent text selection to feel like an app */
   user-select: none;
   -webkit-user-select: none;

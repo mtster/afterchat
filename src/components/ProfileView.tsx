@@ -17,9 +17,9 @@ export default function ProfileView({ currentUser, onBack, toggleTheme, isDarkMo
   const [showSettings, setShowSettings] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
 
-  // Transition on Mount
   useEffect(() => {
-    setTimeout(() => setIsVisible(true), 10);
+    const timer = setTimeout(() => setIsVisible(true), 10);
+    return () => clearTimeout(timer);
   }, []);
 
   const handleBack = () => {
@@ -27,23 +27,16 @@ export default function ProfileView({ currentUser, onBack, toggleTheme, isDarkMo
     setTimeout(onBack, 300);
   };
 
-  // Fetch Full Profile Data (Username) and Roomers
   useEffect(() => {
-    // 1. Get Username from DB
     getUserProfile(currentUser.uid).then(p => {
         if (p && p.username) setUsername(p.username);
     });
-
-    // 2. Watch Roomers (Only count accepted added users for the stat)
     const userRef = ref(db, `users/${currentUser.uid}`);
     const unsub = onValue(userRef, async (snapshot) => {
         const data = snapshot.val();
         if (data && data.addedUsers) {
             const uids = Object.keys(data.addedUsers);
             const details = await Promise.all(uids.map(uid => {
-                 // We treat anyone in 'addedUsers' as a "Roomer" for this list, 
-                 // though strictly stats usually count accepted connections.
-                 // Let's count all added.
                  const val = data.addedUsers[uid];
                  const status = val === 'accepted' ? 'accepted' : 'pending_outgoing';
                  return getRoomerDetails(uid, status);
@@ -59,11 +52,7 @@ export default function ProfileView({ currentUser, onBack, toggleTheme, isDarkMo
   const handleSaveUsername = async () => {
     let term = username.trim();
     if (!term.startsWith('$')) term = '$' + term;
-
-    if (term.length < 2) {
-        alert("Username too short.");
-        return;
-    }
+    if (term.length < 2) return alert("Username too short.");
     
     setSaving(true);
     try {
@@ -89,15 +78,15 @@ export default function ProfileView({ currentUser, onBack, toggleTheme, isDarkMo
 
   if (showSettings) {
       return (
-        <div className="flex flex-col h-full w-full bg-background fixed inset-0 z-30">
-            <div className="pt-safe-top px-4 py-3 flex items-center border-b border-border">
-                <button onClick={() => setShowSettings(false)} className="flex items-center text-zinc-400 hover:text-white">
+        <div className="flex flex-col w-screen bg-background fixed inset-0 z-30" style={{ height: 'var(--app-height, 100dvh)' }}>
+            <div className="flex-none pt-safe-top px-4 py-3 flex items-center border-b border-border bg-background z-40">
+                <button onClick={() => setShowSettings(false)} className="flex items-center text-zinc-400 hover:text-white p-2 -ml-2">
                     <svg className="w-6 h-6 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
                     Back
                 </button>
                 <span className="font-semibold text-lg flex-1 text-center pr-16">Settings</span>
             </div>
-            <div className="p-6">
+            <div className="flex-1 overflow-y-auto p-6 no-scrollbar pb-safe-bottom">
                 <div className="flex items-center justify-between p-4 bg-zinc-900 rounded-xl border border-zinc-800">
                     <span className="text-white font-medium">Dark Mode</span>
                     <button 
@@ -114,20 +103,20 @@ export default function ProfileView({ currentUser, onBack, toggleTheme, isDarkMo
 
   return (
     <div 
-        className={`flex flex-col h-full w-full bg-background z-30 fixed inset-0 overflow-y-auto no-scrollbar transition-transform duration-300 ease-in-out ${isVisible ? 'translate-x-0' : 'translate-x-full'}`}
+        className={`flex flex-col w-screen bg-background z-30 fixed inset-0 transition-transform duration-300 ease-in-out ${isVisible ? 'translate-x-0' : 'translate-x-full'}`}
+        style={{ height: 'var(--app-height, 100dvh)' }}
     >
        {/* Header */}
-       <div className="pt-safe-top px-4 py-3 flex items-center border-b border-border bg-background/95 backdrop-blur-sm sticky top-0">
-        <button onClick={handleBack} className="text-zinc-400 hover:text-white mr-4 flex items-center gap-1">
+       <div className="flex-none pt-safe-top px-4 py-3 flex items-center border-b border-border bg-background/95 backdrop-blur-sm z-40">
+        <button onClick={handleBack} className="text-zinc-400 hover:text-white mr-4 flex items-center gap-1 p-2 -ml-2 active:opacity-60">
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
             <span className="text-lg">Rooms</span>
         </button>
         <span className="font-semibold text-lg flex-1 text-center pr-20">Profile</span>
       </div>
 
-      <div className="p-6 flex flex-col items-center">
-        {/* Avatar */}
-        <div className="w-24 h-24 rounded-full bg-zinc-800 mb-4 overflow-hidden border-2 border-zinc-800">
+      <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center no-scrollbar pb-safe-bottom">
+        <div className="w-24 h-24 rounded-full bg-zinc-800 mb-4 overflow-hidden border-2 border-zinc-800 shrink-0">
              {currentUser.photoURL ? (
                 <img src={currentUser.photoURL} alt="Me" className="w-full h-full object-cover" />
              ) : (
@@ -137,15 +126,13 @@ export default function ProfileView({ currentUser, onBack, toggleTheme, isDarkMo
              )}
         </div>
 
-        {/* Username Display */}
         <h2 className="text-xl font-bold text-white mb-1">{username}</h2>
         <p className="text-zinc-500 text-sm">{currentUser.email}</p>
         <p className="text-blue-500 text-xs font-bold mt-2 uppercase tracking-wide">
             {myRoomers.length} Active Roomer{myRoomers.length !== 1 && 's'}
         </p>
 
-        {/* Action Buttons */}
-        <div className="flex gap-3 mt-6 w-full max-w-xs">
+        <div className="flex gap-3 mt-6 w-full max-w-xs shrink-0">
             <button 
                 onClick={() => setShowSettings(true)}
                 className="flex-1 py-2 bg-zinc-800 rounded-lg text-sm font-medium hover:bg-zinc-700 transition-colors"
@@ -154,8 +141,7 @@ export default function ProfileView({ currentUser, onBack, toggleTheme, isDarkMo
             </button>
         </div>
 
-        {/* Edit Username */}
-        <div className="w-full max-w-md space-y-6 mt-8">
+        <div className="w-full max-w-md space-y-6 mt-8 shrink-0">
             <div>
                 <label className="block text-xs font-bold text-zinc-500 uppercase mb-2 ml-1">Edit Username</label>
                 <div className="flex gap-2">
@@ -176,7 +162,6 @@ export default function ProfileView({ currentUser, onBack, toggleTheme, isDarkMo
                 </div>
             </div>
 
-            {/* Roomer List Management */}
             <div>
                 <label className="block text-xs font-bold text-zinc-500 uppercase mb-2 ml-1">My Roomers (People I Added)</label>
                 <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl overflow-hidden">
