@@ -1,5 +1,5 @@
 import React from 'react';
-import { signInWithPopup, signInWithRedirect } from 'firebase/auth';
+import { signInWithPopup, signInWithRedirect, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import { auth, googleProvider, updateUserProfile } from '../services/firebase';
 
 const Login: React.FC = () => {
@@ -12,6 +12,10 @@ const Login: React.FC = () => {
       const isStandalone = window.matchMedia('(display-mode: standalone)').matches || isIOSStandalone;
       
       console.log("[Login] Env Check:", { isStandalone, isIOSStandalone });
+
+      // 1. CRITICAL: Await Persistence before any auth action
+      await setPersistence(auth, browserLocalPersistence);
+      console.log("[Login] Persistence Set to LOCAL");
 
       if (isStandalone) {
         console.log("[Login] Attempting Redirect (Standalone)");
@@ -37,11 +41,10 @@ const Login: React.FC = () => {
       
       let errorMessage = `Login Failed: ${error.message}`;
 
-      // Handle specific configuration errors
       if (error.code === 'auth/operation-not-allowed') {
-        errorMessage = "CONFIG ERROR: Google Sign-In is disabled. Enable it in Firebase Console -> Auth -> Sign-in method.";
+        errorMessage = "CONFIG ERROR: Google Sign-In is disabled.";
       } else if (error.code === 'auth/unauthorized-domain') {
-        errorMessage = "DOMAIN ERROR: This domain is not authorized. Add it in Firebase Console -> Auth -> Settings.";
+        errorMessage = "DOMAIN ERROR: This domain is not authorized.";
       } else if (error.code === 'auth/popup-closed-by-user') {
         errorMessage = "Sign-in cancelled.";
       }

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { db, findUserByEmailOrUsername, addRoomerToUser, getRoomerDetails } from '../services/firebase';
+import { db, findUserByEmailOrUsername, addRoomerToUser, getRoomerDetails, approveRoomer, deleteRoomer } from '../services/firebase';
 import { ref, onValue } from 'firebase/database';
 import { UserProfile, Roomer } from '../types';
 
@@ -18,25 +18,46 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResult, setSearchResult] = useState<Roomer | null>(null);
   const [searchError, setSearchError] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
 
-  // 1. Listen for my roomers
+  // 1. Listen for roomers (Added Users + Pending Approvals)
   useEffect(() => {
-    const roomersRef = ref(db, `users/${currentUser.uid}/roomers`);
-    const unsub = onValue(roomersRef, async (snapshot) => {
+    const userRef = ref(db, `users/${currentUser.uid}`);
+    
+    const unsub = onValue(userRef, async (snapshot) => {
       const data = snapshot.val();
+      const allRoomers: Roomer[] = [];
+
       if (data) {
-        const uids = Object.keys(data);
-        const details = await Promise.all(uids.map(uid => getRoomerDetails(uid)));
-        setRoomers(details.filter(r => r !== null) as Roomer[]);
-      } else {
-        setRoomers([]);
+        // A. Process "addedUsers" (People I added)
+        if (data.addedUsers) {
+             const addedUids = Object.keys(data.addedUsers);
+             const addedDetails = await Promise.all(addedUids.map(async (uid) => {
+                 // Check value to see if pending or accepted
+                 const val = data.addedUsers[uid];
+                 const status = val === 'accepted' ? 'accepted' : 'pending_outgoing';
+                 return getRoomerDetails(uid, status);
+             }));
+             allRoomers.push(...addedDetails.filter(r => r !== null) as Roomer[]);
+        }
+
+        // B. Process "pendingApprovals" (People who added me)
+        if (data.pendingApprovals) {
+            const pendingUids = Object.keys(data.pendingApprovals);
+            const pendingDetails = await Promise.all(pendingUids.map(uid => getRoomerDetails(uid, 'pending_incoming')));
+            allRoomers.push(...pendingDetails.filter(r => r !== null) as Roomer[]);
+        }
       }
+      
+      // Deduplicate (in case of race condition logic)
+      const unique = Array.from(new Map(allRoomers.map(item => [item.uid, item])).values());
+      setRoomers(unique);
       setLoading(false);
     });
     return () => unsub();
   }, [currentUser.uid]);
 
-  // 2. Search Logic
+  // Search Logic
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     setSearchError('');
@@ -44,18 +65,19 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
     let term = searchTerm.trim();
     if (!term) return;
 
-    // Auto-Prefix $ logic if it looks like a username (not email)
-    if (!term.includes('@') && !term.startsWith('$')) {
-        term = '$' + term;
-    }
-
     try {
       const result = await findUserByEmailOrUsername(term);
       if (result) {
         if (result.uid === currentUser.uid) {
             setSearchError("You cannot add yourself.");
         } else {
-            setSearchResult(result);
+            // Check if already added
+            const exists = roomers.find(r => r.uid === result.uid);
+            if (exists) {
+                setSearchError("User already in your rooms.");
+            } else {
+                setSearchResult(result);
+            }
         }
       } else {
         setSearchError('User not found.');
@@ -65,9 +87,9 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
     }
   };
 
-  // 3. Add Logic
   const handleAddUser = async () => {
     if (!searchResult) return;
+    setIsProcessing(true);
     try {
       await addRoomerToUser(currentUser.uid, searchResult.uid);
       setShowAddModal(false);
@@ -77,6 +99,19 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
       console.error(err);
       alert("Could not add user.");
     }
+    setIsProcessing(false);
+  };
+
+  const handleApprove = async (e: React.MouseEvent, uid: string) => {
+      e.stopPropagation();
+      await approveRoomer(currentUser.uid, uid);
+  };
+
+  const handleReject = async (e: React.MouseEvent, uid: string) => {
+      e.stopPropagation();
+      if(window.confirm("Reject this request?")) {
+        await deleteRoomer(currentUser.uid, uid);
+      }
   };
 
   return (
@@ -86,14 +121,6 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
         <h1 className="text-2xl font-bold text-white tracking-tight">Rooms</h1>
         
         <div className="flex items-center gap-3">
-          {/* Search Icon (Triggers Modal with Search focus) */}
-          <button 
-            onClick={() => setShowAddModal(true)}
-            className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-zinc-800 text-zinc-400"
-          >
-             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-          </button>
-
           {/* Add Roomer Button */}
           <button 
             onClick={() => setShowAddModal(true)}
@@ -140,31 +167,56 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
           </div>
         ) : (
           <div className="space-y-1">
-            {roomers.map(roomer => (
-              <button
-                key={roomer.uid}
-                onClick={() => onNavigateChat(roomer)}
-                className="w-full flex items-center gap-4 p-3 hover:bg-zinc-900/50 rounded-xl transition-colors active:bg-zinc-900"
-              >
-                {/* Avatar */}
-                <div className="w-12 h-12 rounded-full bg-zinc-800 overflow-hidden flex-shrink-0 border border-zinc-800">
-                  {roomer.photoURL ? (
-                    <img src={roomer.photoURL} alt={roomer.displayName} className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-zinc-500">
-                      <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" /></svg>
+            {roomers.map(roomer => {
+                const isPending = roomer.status === 'pending_incoming' || roomer.status === 'pending_outgoing';
+                const isIncoming = roomer.status === 'pending_incoming';
+
+                return (
+                  <button
+                    key={roomer.uid}
+                    onClick={() => onNavigateChat(roomer)}
+                    className={`w-full flex items-center gap-4 p-3 rounded-xl transition-colors active:bg-zinc-900 ${isPending ? 'bg-zinc-900/20 opacity-70' : 'hover:bg-zinc-900/50'}`}
+                  >
+                    {/* Avatar */}
+                    <div className={`w-12 h-12 rounded-full overflow-hidden flex-shrink-0 border ${isPending ? 'border-zinc-800 opacity-50' : 'border-zinc-700'}`}>
+                      {roomer.photoURL ? (
+                        <img src={roomer.photoURL} alt={roomer.displayName} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-zinc-500 bg-zinc-800">
+                          <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" /></svg>
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-                {/* Info */}
-                <div className="flex-1 text-left min-w-0">
-                  <div className="flex justify-between items-baseline">
-                    <h3 className="text-white font-medium truncate">{roomer.displayName}</h3>
-                  </div>
-                  <p className="text-zinc-500 text-sm truncate">{roomer.username || roomer.email}</p>
-                </div>
-              </button>
-            ))}
+                    
+                    {/* Info */}
+                    <div className="flex-1 text-left min-w-0">
+                      <div className="flex justify-between items-baseline">
+                        <h3 className={`font-medium truncate ${isPending ? 'text-zinc-400' : 'text-white'}`}>{roomer.displayName}</h3>
+                      </div>
+                      <p className="text-zinc-500 text-sm truncate">
+                        {isIncoming ? 'Pending Request' : (roomer.status === 'pending_outgoing' ? 'Sent Request' : (roomer.username || roomer.email))}
+                      </p>
+                    </div>
+
+                    {/* Action Buttons for Incoming Pending */}
+                    {isIncoming && (
+                        <div className="flex gap-2">
+                            <div 
+                                onClick={(e) => handleReject(e, roomer.uid)}
+                                className="w-8 h-8 flex items-center justify-center rounded-full bg-zinc-900 border border-zinc-800 text-red-500 active:scale-90"
+                            >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                            </div>
+                            <div 
+                                onClick={(e) => handleApprove(e, roomer.uid)}
+                                className="w-8 h-8 flex items-center justify-center rounded-full bg-white text-black active:scale-90"
+                            >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                            </div>
+                        </div>
+                    )}
+                  </button>
+            )})}
           </div>
         )}
       </div>
@@ -176,23 +228,14 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
             <h2 className="text-lg font-semibold text-white mb-4">Add Roomer</h2>
             
             <form onSubmit={handleSearch} className="mb-4">
-              <div className="relative flex gap-2">
-                <input
+               <input
                   type="text"
                   placeholder="Email or Username"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="flex-1 bg-black border border-zinc-700 rounded-xl px-4 py-3 text-white placeholder-zinc-600 focus:border-white focus:outline-none transition-colors"
+                  className="w-full bg-black border border-zinc-700 rounded-xl px-4 py-3 text-white placeholder-zinc-600 focus:border-white focus:outline-none transition-colors"
                   autoFocus
                 />
-                 {/* New Search Button */}
-                 <button 
-                    type="submit"
-                    className="bg-white text-black font-bold text-sm px-4 rounded-xl active:scale-95 transition-transform"
-                 >
-                    Search
-                 </button>
-              </div>
             </form>
 
             {/* Results Area */}
@@ -215,6 +258,7 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
                 </div>
                 <button 
                     onClick={handleAddUser}
+                    disabled={isProcessing}
                     className="bg-white text-black text-xs font-bold px-3 py-1.5 rounded-full"
                 >
                     ADD
@@ -222,12 +266,20 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
               </div>
             )}
 
-            <button 
-              onClick={() => { setShowAddModal(false); setSearchTerm(''); setSearchResult(null); setSearchError(''); }}
-              className="w-full py-3 text-zinc-400 text-sm hover:text-white transition-colors"
-            >
-              Cancel
-            </button>
+            <div className="flex gap-3 pt-2">
+                <button 
+                    onClick={() => { setShowAddModal(false); setSearchTerm(''); setSearchResult(null); setSearchError(''); }}
+                    className="flex-1 py-3 text-zinc-400 text-sm hover:text-white bg-zinc-800 rounded-xl transition-colors"
+                >
+                    Cancel
+                </button>
+                 <button 
+                    onClick={handleSearch}
+                    className="flex-1 py-3 bg-white text-black font-bold text-sm rounded-xl active:scale-95 transition-transform"
+                 >
+                    Search
+                 </button>
+            </div>
           </div>
         </div>
       )}

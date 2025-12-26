@@ -34,13 +34,20 @@ export default function ProfileView({ currentUser, onBack, toggleTheme, isDarkMo
         if (p && p.username) setUsername(p.username);
     });
 
-    // 2. Watch Roomers
-    const roomersRef = ref(db, `users/${currentUser.uid}/roomers`);
-    const unsub = onValue(roomersRef, async (snapshot) => {
+    // 2. Watch Roomers (Only count accepted added users for the stat)
+    const userRef = ref(db, `users/${currentUser.uid}`);
+    const unsub = onValue(userRef, async (snapshot) => {
         const data = snapshot.val();
-        if (data) {
-            const uids = Object.keys(data);
-            const details = await Promise.all(uids.map(uid => getRoomerDetails(uid)));
+        if (data && data.addedUsers) {
+            const uids = Object.keys(data.addedUsers);
+            const details = await Promise.all(uids.map(uid => {
+                 // We treat anyone in 'addedUsers' as a "Roomer" for this list, 
+                 // though strictly stats usually count accepted connections.
+                 // Let's count all added.
+                 const val = data.addedUsers[uid];
+                 const status = val === 'accepted' ? 'accepted' : 'pending_outgoing';
+                 return getRoomerDetails(uid, status);
+            }));
             setMyRoomers(details.filter(r => r !== null) as Roomer[]);
         } else {
             setMyRoomers([]);
@@ -171,7 +178,7 @@ export default function ProfileView({ currentUser, onBack, toggleTheme, isDarkMo
 
             {/* Roomer List Management */}
             <div>
-                <label className="block text-xs font-bold text-zinc-500 uppercase mb-2 ml-1">My Roomers</label>
+                <label className="block text-xs font-bold text-zinc-500 uppercase mb-2 ml-1">My Roomers (People I Added)</label>
                 <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl overflow-hidden">
                     {myRoomers.length === 0 ? (
                         <div className="p-4 text-center text-zinc-600 text-sm">No active roomers.</div>

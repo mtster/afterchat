@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { ref, push, onValue, serverTimestamp } from 'firebase/database';
-import { db, isUserBlockedByTarget } from '../services/firebase';
+import { db } from '../services/firebase';
 import { Message, UserProfile, Roomer } from '../types';
 
 interface ChatViewProps {
@@ -14,21 +14,18 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isVisible, setIsVisible] = useState(false);
-  const [isBlocked, setIsBlocked] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  
+  // Status Logic
+  const isPendingOutgoing = recipient.status === 'pending_outgoing';
+  const isPendingIncoming = recipient.status === 'pending_incoming';
+  const isAccepted = recipient.status === 'accepted';
+  const isBlocked = !isAccepted && !isPendingOutgoing && !isPendingIncoming; // Fallback if status lost
 
   // Animation Mount
   useEffect(() => {
     setTimeout(() => setIsVisible(true), 10);
-    
-    // Check if the other user has deleted us
-    const checkStatus = async () => {
-        const blocked = await isUserBlockedByTarget(currentUser.uid, recipient.uid);
-        if (blocked) setIsBlocked(true);
-    };
-    checkStatus();
-
-  }, [currentUser.uid, recipient.uid]);
+  }, []);
 
   const handleBack = () => {
     setIsVisible(false);
@@ -60,7 +57,7 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim()) return;
-    if (isBlocked) return;
+    if (!isAccepted) return; // Prevent sending if not accepted
 
     const messageContent = inputText;
     const messagesRef = ref(db, `rooms/${roomId}/messages`);
@@ -121,11 +118,13 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
         <div ref={bottomRef} />
       </div>
 
-      {/* Input or Blocked Message */}
+      {/* Input or Status Message */}
       <div className="p-3 bg-zinc-900 border-t border-border pb-safe-bottom">
-        {isBlocked ? (
-            <div className="w-full py-3 text-center text-red-400 text-sm font-medium bg-zinc-950/50 rounded-lg">
-                This roomer has removed you.
+        {!isAccepted ? (
+            <div className="w-full py-3 text-center text-zinc-400 text-sm font-medium bg-zinc-950/50 rounded-lg border border-zinc-800">
+                {isPendingOutgoing && `Waiting for ${recipient.displayName} to accept.`}
+                {isPendingIncoming && `Accept this roomer to start chatting.`}
+                {isBlocked && `This roomer has removed you.`}
             </div>
         ) : (
             <form onSubmit={handleSend} className="flex gap-2">

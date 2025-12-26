@@ -16,13 +16,14 @@ export interface Message {
   timestamp: number;
 }
 
-// Simplified Roomer (Contact) interface
+// Roomer now includes status for the approval flow
 export interface Roomer {
   uid: string;
   displayName: string;
   photoURL: string | null;
   username: string | null;
   email: string | null;
+  status: 'accepted' | 'pending_incoming' | 'pending_outgoing'; 
 }
 
 export type AppView = 
