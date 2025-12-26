@@ -20,7 +20,8 @@ import { UserProfile, Roomer } from "../types";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  // Proxy through Vercel to avoid 3rd party cookie blocking on iOS PWA
+  authDomain: typeof window !== 'undefined' ? window.location.hostname : "afterchat.firebaseapp.com",
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
@@ -121,8 +122,6 @@ export const findUserByEmailOrUsername = async (searchTerm: string): Promise<Roo
 // --- ROOMER APPROVAL FLOW ---
 
 // 1. ADD: User A adds User B
-// Writes to BOTH User A's `addedUsers` and User B's `pendingApprovals`
-// FIX: Split into separate updates to target specific nodes to avoid root-level write permission issues
 export const addRoomerToUser = async (currentUid: string, targetUid: string) => {
   // Update 1: My List
   await update(ref(db, `users/${currentUid}/addedUsers`), {
@@ -137,7 +136,6 @@ export const addRoomerToUser = async (currentUid: string, targetUid: string) => 
 
 // 2. APPROVE: User B accepts User A
 export const approveRoomer = async (currentUid: string, targetUid: string) => {
-    // Similar split strategy for safety against permission denied
     // 1. Update Me
     const myUpdates = {
         [`pendingApprovals/${targetUid}`]: null,

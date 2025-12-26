@@ -1,6 +1,10 @@
 {
   "rewrites": [
     {
+      "source": "/__/auth/:path*",
+      "destination": "https://afterchat.firebaseapp.com/__/auth/:path*"
+    },
+    {
       "source": "/firebase-messaging-sw.js",
       "destination": "/firebase-messaging-sw.js"
     },

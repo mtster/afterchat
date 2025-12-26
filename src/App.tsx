@@ -18,114 +18,41 @@ export default function App() {
   useEffect(() => {
     let unsubscribe: () => void;
 
-    // Detect Standalone Mode
-    const isIOSStandalone = (window.navigator as any).standalone === true;
-    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || isIOSStandalone;
-
-    // --- AGGRESSIVE HANDSHAKE FUNCTION ---
-    const runHandshake = async () => {
-        // Check both storages
-        const localPending = localStorage.getItem('onyx_auth_redirect_pending') === 'true';
-        const sessionPending = sessionStorage.getItem('onyx_auth_redirect_pending') === 'true';
-        
-        // Fail-safe: If standalone, always check, even if flags are missing (iOS wipes storage often)
-        const shouldCheck = localPending || sessionPending || isStandalone;
-
-        if (!shouldCheck) {
-            console.log("[Handshake] No pending redirect flag found and not standalone.");
-            return;
-        }
-
-        if (isStandalone && !localPending && !sessionPending) {
-            console.log("[Handshake] Standalone Fail-safe Triggered (No flags found)");
-        }
-
-        console.log("[Handshake] Starting aggressive check...");
-        
-        // Retry mechanism: 3 attempts with 500ms delay
-        for (let i = 1; i <= 3; i++) {
+    const initAuth = async () => {
+        try {
+            console.log("STAGE 1: Init Auth - Setting Persistence");
+            await setPersistence(auth, browserLocalPersistence);
+            
+            // 2. Check Redirect Result (Standard check for returning from OAuth)
             try {
-                console.log(`[Handshake] Attempt ${i}/3`);
                 const result = await getRedirectResult(auth);
                 if (result?.user) {
-                    console.log(`[Handshake] Redirect Result Received: ${result.user.email}`);
-                    
-                    // Cleanup Flags
-                    localStorage.removeItem('onyx_auth_redirect_pending');
-                    sessionStorage.removeItem('onyx_auth_redirect_pending');
-                    
-                    // Set User
+                    console.log("[Auth] Redirect Success:", result.user.email);
                     setUser(result.user);
-                    setLoadingAuth(false);
-                    
-                    // Sync Profile
+                    // Sync Profile immediately
                     updateUserProfile(result.user.uid, {
                         email: result.user.email,
                         displayName: result.user.displayName,
                         photoURL: result.user.photoURL,
                         lastOnline: Date.now()
                     });
-                    return; // Handshake complete
                 } else {
-                     console.log(`[Handshake] Attempt ${i}: Redirect Result: Null.`);
+                    console.log("[Auth] No Redirect Result found.");
                 }
             } catch (e: any) {
-                console.error(`[Handshake] Error attempt ${i}:`, e.code, e.message);
+                console.error("[Auth] Redirect Error:", e.code, e.message);
             }
-            // Wait 500ms before next retry
-            await new Promise(resolve => setTimeout(resolve, 500));
-        }
-
-        // Exhausted
-        console.log("[Handshake] Exhausted all attempts. Clearing flags.");
-        localStorage.removeItem('onyx_auth_redirect_pending');
-        sessionStorage.removeItem('onyx_auth_redirect_pending');
-        
-        // NOTE: We do NOT force setLoadingAuth(false) here immediately if standalone,
-        // we let onAuthStateChanged's grace period handle the final verdict.
-    };
-
-    const initAuth = async () => {
-        try {
-            console.log("STAGE 1: Init Auth - Setting Persistence");
-            await setPersistence(auth, browserLocalPersistence);
-            
-            // Run handshake immediately on mount
-            // We do NOT await this, let it run in parallel with the listener
-            runHandshake();
 
             // 3. Attach Listener
             unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
                 console.log("STAGE 3: Auth State Changed:", currentUser ? currentUser.email : "NULL");
                 
                 if (currentUser) {
-                    // Success case
-                    localStorage.removeItem('onyx_auth_redirect_pending');
-                    sessionStorage.removeItem('onyx_auth_redirect_pending');
                     setUser(currentUser);
                     setLoadingAuth(false);
                 } else {
-                    // No user in Auth State
-                    // Grace Period for Standalone
-                    if (isStandalone) {
-                        console.log("[AuthGuard] User null in Standalone. Initiating Grace Period (2s)...");
-                        setTimeout(() => {
-                            // Re-check auth.currentUser directly to see if handshake succeeded in the meantime
-                            if (!auth.currentUser) {
-                                console.log("[AuthGuard] Grace Period Over. Still no user. Showing Login.");
-                                setUser(null);
-                                setLoadingAuth(false);
-                                setView({ name: 'ROOMS_LIST' });
-                            } else {
-                                console.log("[AuthGuard] Grace Period Over. User found! (Handshake success)");
-                            }
-                        }, 2000);
-                    } else {
-                        // Browser mode - fail fast
-                        setUser(null);
-                        setLoadingAuth(false);
-                        setView({ name: 'ROOMS_LIST' });
-                    }
+                    setUser(null);
+                    setLoadingAuth(false);
                 }
             });
 
@@ -137,18 +64,8 @@ export default function App() {
 
     initAuth();
 
-    // Visibility Listener to re-trigger handshake when returning to app (iOS PWA)
-    const handleVisibilityChange = () => {
-        if (document.visibilityState === 'visible') {
-            console.log("[App] Visibility changed to VISIBLE. Checking handshake.");
-            runHandshake();
-        }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
     return () => {
         if (unsubscribe) unsubscribe();
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
 
@@ -187,7 +104,7 @@ export default function App() {
       return (
         <div className="h-[100dvh] w-screen bg-black flex flex-col items-center justify-center gap-4">
             <div className="w-12 h-12 rounded-full border-2 border-zinc-800 border-t-white animate-spin" />
-            <p className="text-zinc-500 text-xs font-mono">AUTHENTICATING SECURE CHANNEL...</p>
+            <p className="text-zinc-500 text-xs font-mono">AUTHENTICATING...</p>
         </div>
       );
   }

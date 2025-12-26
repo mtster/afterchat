@@ -13,17 +13,13 @@ const Login: React.FC = () => {
       
       console.log("[Login] Env Check:", { isStandalone, isIOSStandalone });
 
-      // 1. CRITICAL: Await Persistence before any auth action
+      // 1. Await Persistence
       await setPersistence(auth, browserLocalPersistence);
       console.log("[Login] Persistence Set to LOCAL");
 
       if (isStandalone) {
-        console.log("[Login] Attempting Redirect (Standalone)");
-        // FLAG: Set pending state in BOTH storages for redundancy on iOS
-        localStorage.setItem('onyx_auth_redirect_pending', 'true');
-        sessionStorage.setItem('onyx_auth_redirect_pending', 'true');
-        console.log("[Login] Redirect Flags Set (Local + Session)");
-        
+        console.log("[Login] Attempting Redirect (Standalone/Proxy)");
+        // With first-party proxy, cookies work natively on iOS PWA.
         await signInWithRedirect(auth, googleProvider);
       } else {
         console.log("[Login] Attempting Popup (Browser)");
@@ -43,9 +39,6 @@ const Login: React.FC = () => {
       }
     } catch (error: any) {
       console.error("[Login] CRITICAL FAILURE:", error.code, error.message);
-      // Clean up flag if error occurs
-      localStorage.removeItem('onyx_auth_redirect_pending');
-      sessionStorage.removeItem('onyx_auth_redirect_pending');
       
       let errorMessage = `Login Failed: ${error.message}`;
 
