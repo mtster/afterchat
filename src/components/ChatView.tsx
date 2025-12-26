@@ -53,7 +53,6 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
   }, [roomId]);
 
   useEffect(() => {
-    // Scroll to bottom
     if (bottomRef.current) {
         bottomRef.current.scrollIntoView({ behavior: 'smooth' });
     }
@@ -64,15 +63,12 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
     const text = inputText.trim();
     if (!text || !isAccepted) return;
 
-    // 1. Clear input
     setInputText('');
     
-    // 2. Refocus aggressively to keep keyboard up
     if (inputRef.current) {
         inputRef.current.focus();
     }
 
-    // 3. Send
     const messagesRef = ref(db, `rooms/${roomId}/messages`);
     await push(messagesRef, {
       senderId: currentUser.uid,
@@ -84,11 +80,13 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
 
   return (
     <div 
-        className={`flex flex-col w-screen bg-background fixed inset-0 z-20 transition-transform duration-300 ease-in-out ${isVisible ? 'translate-x-0' : 'translate-x-full'}`}
-        style={{ height: 'var(--app-height, 100dvh)' }}
+        className={`flex flex-col h-[100dvh] w-screen bg-background fixed inset-0 z-20 transition-transform duration-300 ease-in-out ${isVisible ? 'translate-x-0' : 'translate-x-full'}`}
     >
-      {/* Header - Sticky with Safe Area */}
-      <div className="flex-none grid grid-cols-6 items-center px-4 py-3 border-b border-border bg-background/90 backdrop-blur-md pt-safe-top z-30">
+      {/* Header - Sticky with explicitly calculated Safe Area Padding */}
+      <div 
+        className="flex-none grid grid-cols-6 items-center px-4 py-3 border-b border-border bg-background/90 backdrop-blur-md sticky top-0 z-50"
+        style={{ paddingTop: 'max(16px, env(safe-area-inset-top))' }}
+      >
         <button 
           onClick={handleBack}
           className="col-span-1 justify-self-start text-white p-2 -ml-2 active:opacity-50"
@@ -105,7 +103,7 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
         <div className="col-span-1" />
       </div>
 
-      {/* Messages Area - Flex Grow */}
+      {/* Messages Area */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar bg-background w-full">
         {messages.map((msg) => {
           const isMe = msg.senderId === currentUser.uid;
@@ -126,8 +124,11 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
         <div ref={bottomRef} className="h-4" />
       </div>
 
-      {/* Input Area - Fixed Bottom Logic */}
-      <div className="flex-none p-3 bg-zinc-900 border-t border-border pb-safe-bottom z-30 w-full">
+      {/* Input Area - Footer with Safe Area */}
+      <div 
+        className="flex-none p-3 bg-zinc-900 border-t border-border z-30 w-full"
+        style={{ paddingBottom: 'max(10px, env(safe-area-inset-bottom))' }}
+      >
         {!isAccepted ? (
             <div className="w-full py-3 text-center text-zinc-400 text-sm font-medium bg-zinc-950/50 rounded-lg border border-zinc-800">
                 {isPendingOutgoing && `Waiting for ${recipient.displayName} to accept.`}
@@ -144,13 +145,11 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
                 placeholder="Message"
                 className="flex-1 bg-black border border-zinc-700 rounded-full px-4 py-2 text-white placeholder-zinc-500 focus:outline-none focus:border-blue-500 transition-colors"
                 autoComplete="off"
-                // IMPORTANT: Prevents layout jumping on iOS
                 enterKeyHint="send"
             />
             <button 
                 type="submit"
                 disabled={!inputText.trim()}
-                // VITAL: Prevent default on click/touch to prevent button from stealing focus from input
                 onMouseDown={(e) => e.preventDefault()}
                 onTouchStart={(e) => e.preventDefault()}
                 className={`w-10 h-10 rounded-full flex items-center justify-center transition-all flex-shrink-0 ${

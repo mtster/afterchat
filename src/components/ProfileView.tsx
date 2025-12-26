@@ -78,15 +78,18 @@ export default function ProfileView({ currentUser, onBack, toggleTheme, isDarkMo
 
   if (showSettings) {
       return (
-        <div className="flex flex-col w-screen bg-background fixed inset-0 z-30" style={{ height: 'var(--app-height, 100dvh)' }}>
-            <div className="flex-none pt-safe-top px-4 py-3 flex items-center border-b border-border bg-background z-40">
+        <div className="flex flex-col h-[100dvh] w-screen bg-background fixed inset-0 z-30">
+            <div 
+                className="flex-none px-4 py-3 flex items-center border-b border-border bg-background z-40 sticky top-0"
+                style={{ paddingTop: 'max(16px, env(safe-area-inset-top))' }}
+            >
                 <button onClick={() => setShowSettings(false)} className="flex items-center text-zinc-400 hover:text-white p-2 -ml-2">
                     <svg className="w-6 h-6 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
                     Back
                 </button>
                 <span className="font-semibold text-lg flex-1 text-center pr-16">Settings</span>
             </div>
-            <div className="flex-1 overflow-y-auto p-6 no-scrollbar pb-safe-bottom">
+            <div className="flex-1 overflow-y-auto p-6 no-scrollbar pb-20">
                 <div className="flex items-center justify-between p-4 bg-zinc-900 rounded-xl border border-zinc-800">
                     <span className="text-white font-medium">Dark Mode</span>
                     <button 
@@ -103,11 +106,13 @@ export default function ProfileView({ currentUser, onBack, toggleTheme, isDarkMo
 
   return (
     <div 
-        className={`flex flex-col w-screen bg-background z-30 fixed inset-0 transition-transform duration-300 ease-in-out ${isVisible ? 'translate-x-0' : 'translate-x-full'}`}
-        style={{ height: 'var(--app-height, 100dvh)' }}
+        className={`flex flex-col h-[100dvh] w-screen bg-background z-30 fixed inset-0 transition-transform duration-300 ease-in-out ${isVisible ? 'translate-x-0' : 'translate-x-full'}`}
     >
        {/* Header */}
-       <div className="flex-none pt-safe-top px-4 py-3 flex items-center border-b border-border bg-background/95 backdrop-blur-sm z-40">
+       <div 
+         className="flex-none px-4 py-3 flex items-center border-b border-border bg-background/95 backdrop-blur-sm z-40 sticky top-0"
+         style={{ paddingTop: 'max(16px, env(safe-area-inset-top))' }}
+       >
         <button onClick={handleBack} className="text-zinc-400 hover:text-white mr-4 flex items-center gap-1 p-2 -ml-2 active:opacity-60">
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
             <span className="text-lg">Rooms</span>
@@ -115,7 +120,7 @@ export default function ProfileView({ currentUser, onBack, toggleTheme, isDarkMo
         <span className="font-semibold text-lg flex-1 text-center pr-20">Profile</span>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center no-scrollbar pb-safe-bottom">
+      <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center no-scrollbar pb-20">
         <div className="w-24 h-24 rounded-full bg-zinc-800 mb-4 overflow-hidden border-2 border-zinc-800 shrink-0">
              {currentUser.photoURL ? (
                 <img src={currentUser.photoURL} alt="Me" className="w-full h-full object-cover" />

@@ -3,7 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <link rel="icon" href="https://picsum.photos/64" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <!-- Updated Viewport for iOS 15+ Keyboard handling -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
     <meta name="theme-color" content="#000000" />
     <meta name="description" content="Onyx Chat PWA" />
     <link rel="manifest" href="/manifest.json" />
@@ -48,7 +49,7 @@
 }
 </script>
 </head>
-  <body class="bg-background text-white h-[100dvh] w-screen flex flex-col">
+  <body class="bg-background text-white h-[100dvh] w-screen flex flex-col overflow-hidden">
     <div id="root" class="flex-1 h-full w-full flex flex-col"></div>
     <!-- VITAL: Points to src/index.tsx -->
     <script type="module" src="/src/index.tsx"></script>

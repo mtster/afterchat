@@ -103,12 +103,12 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
   };
 
   return (
-    <div 
-        className="flex flex-col w-full bg-background overflow-hidden"
-        style={{ height: 'var(--app-height, 100dvh)' }}
-    >
-      {/* Header */}
-      <div className="flex-none pt-safe-top px-4 pb-3 flex items-center justify-between bg-zinc-900/50 backdrop-blur-md border-b border-zinc-800 z-10">
+    <div className="flex flex-col w-full h-[100dvh] bg-background overflow-hidden">
+      {/* Header - Sticky with Safe Area */}
+      <div 
+        className="flex-none px-4 pb-3 flex items-center justify-between bg-zinc-900/50 backdrop-blur-md border-b border-zinc-800 sticky top-0 z-10"
+        style={{ paddingTop: 'max(16px, env(safe-area-inset-top))' }}
+      >
         <h1 className="text-2xl font-bold text-white tracking-tight">Rooms</h1>
         
         <div className="flex items-center gap-3">
@@ -137,7 +137,7 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
       </div>
 
       {/* Body */}
-      <div className="flex-1 overflow-y-auto no-scrollbar p-4 pb-safe-bottom">
+      <div className="flex-1 overflow-y-auto no-scrollbar p-4 pb-20">
         {loading ? (
            <div className="flex justify-center mt-10 text-zinc-600 text-sm">Loading...</div>
         ) : roomers.length === 0 ? (

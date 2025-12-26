@@ -14,33 +14,7 @@ export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [loadingAuth, setLoadingAuth] = useState(true);
 
-  // 1. Dynamic Viewport Height (Critical for iOS Keyboard)
-  useEffect(() => {
-    const setViewportHeight = () => {
-       const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-       document.documentElement.style.setProperty('--app-height', `${vh}px`);
-    };
-    
-    if (window.visualViewport) {
-        window.visualViewport.addEventListener('resize', setViewportHeight);
-        // Sometimes scroll events affect viewport in older iOS versions
-        window.visualViewport.addEventListener('scroll', setViewportHeight); 
-    }
-    window.addEventListener('resize', setViewportHeight);
-    
-    // Initial Call
-    setViewportHeight();
-    
-    return () => {
-       if (window.visualViewport) {
-           window.visualViewport.removeEventListener('resize', setViewportHeight);
-           window.visualViewport.removeEventListener('scroll', setViewportHeight);
-       }
-       window.removeEventListener('resize', setViewportHeight);
-    };
-  }, []);
-
-  // 2. Auth Init & Hydration
+  // 1. Auth Init & Hydration
   useEffect(() => {
     let unsubscribe: () => void;
 
@@ -132,11 +106,8 @@ export default function App() {
   }
 
   return (
-    // Use the CSS variable for height to match the Visual Viewport exactly
-    <div 
-        className={`w-screen relative flex flex-col overflow-hidden ${isDarkMode ? 'bg-black text-white' : 'bg-gray-100 text-black'}`}
-        style={{ height: 'var(--app-height, 100dvh)' }}
-    >
+    // Rely on 100dvh and the updated meta tag for layout stability
+    <div className={`w-screen h-[100dvh] relative flex flex-col overflow-hidden ${isDarkMode ? 'bg-black text-white' : 'bg-gray-100 text-black'}`}>
       <DebugConsole />
       
       <div className="flex-1 w-full h-full relative z-10 flex flex-col">
