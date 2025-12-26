@@ -15,11 +15,9 @@ const Login: React.FC = () => {
 
       if (isStandalone) {
         console.log("[Login] Attempting Redirect (Standalone)");
-        // FIX: Must pass 'auth' as first argument
         await signInWithRedirect(auth, googleProvider);
       } else {
         console.log("[Login] Attempting Popup (Browser)");
-        // FIX: Must pass 'auth' as first argument
         const result = await signInWithPopup(auth, googleProvider);
         const user = result.user;
         
@@ -36,7 +34,19 @@ const Login: React.FC = () => {
       }
     } catch (error: any) {
       console.error("[Login] CRITICAL FAILURE:", error.code, error.message);
-      alert(`Login Failed: ${error.message}`);
+      
+      let errorMessage = `Login Failed: ${error.message}`;
+
+      // Handle specific configuration errors
+      if (error.code === 'auth/operation-not-allowed') {
+        errorMessage = "CONFIG ERROR: Google Sign-In is disabled. Enable it in Firebase Console -> Auth -> Sign-in method.";
+      } else if (error.code === 'auth/unauthorized-domain') {
+        errorMessage = "DOMAIN ERROR: This domain is not authorized. Add it in Firebase Console -> Auth -> Settings.";
+      } else if (error.code === 'auth/popup-closed-by-user') {
+        errorMessage = "Sign-in cancelled.";
+      }
+
+      alert(errorMessage);
     }
   };
 
