@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { UserProfile, Roomer } from '../types';
-import { updateUserProfile, auth, db, getRoomerDetails, deleteRoomer } from '../services/firebase';
+import { updateUserProfile, auth, db, getRoomerDetails, deleteRoomer, getUserProfile } from '../services/firebase';
 import { ref, onValue } from 'firebase/database';
 
 interface Props {
@@ -11,13 +11,30 @@ interface Props {
 }
 
 export default function ProfileView({ currentUser, onBack, toggleTheme, isDarkMode }: Props) {
-  const [username, setUsername] = useState(currentUser.username || '$');
+  const [username, setUsername] = useState('$');
   const [saving, setSaving] = useState(false);
   const [myRoomers, setMyRoomers] = useState<Roomer[]>([]);
   const [showSettings, setShowSettings] = useState(false);
+  const [isVisible, setIsVisible] = useState(false);
 
-  // Fetch Roomers for management list
+  // Transition on Mount
   useEffect(() => {
+    setTimeout(() => setIsVisible(true), 10);
+  }, []);
+
+  const handleBack = () => {
+    setIsVisible(false);
+    setTimeout(onBack, 300);
+  };
+
+  // Fetch Full Profile Data (Username) and Roomers
+  useEffect(() => {
+    // 1. Get Username from DB
+    getUserProfile(currentUser.uid).then(p => {
+        if (p && p.username) setUsername(p.username);
+    });
+
+    // 2. Watch Roomers
     const roomersRef = ref(db, `users/${currentUser.uid}/roomers`);
     const unsub = onValue(roomersRef, async (snapshot) => {
         const data = snapshot.val();
@@ -33,13 +50,18 @@ export default function ProfileView({ currentUser, onBack, toggleTheme, isDarkMo
   }, [currentUser.uid]);
 
   const handleSaveUsername = async () => {
-    if (!username.startsWith('$') || username.length < 2) {
-        alert("Username must start with $ and be at least 2 characters.");
+    let term = username.trim();
+    if (!term.startsWith('$')) term = '$' + term;
+
+    if (term.length < 2) {
+        alert("Username too short.");
         return;
     }
+    
     setSaving(true);
     try {
-        await updateUserProfile(currentUser.uid, { username });
+        await updateUserProfile(currentUser.uid, { username: term });
+        setUsername(term);
         alert("Username updated!");
     } catch (e) {
         alert("Failed to update.");
@@ -84,10 +106,12 @@ export default function ProfileView({ currentUser, onBack, toggleTheme, isDarkMo
   }
 
   return (
-    <div className="flex flex-col h-full w-full bg-background z-30 fixed inset-0 overflow-y-auto no-scrollbar">
+    <div 
+        className={`flex flex-col h-full w-full bg-background z-30 fixed inset-0 overflow-y-auto no-scrollbar transition-transform duration-300 ease-in-out ${isVisible ? 'translate-x-0' : 'translate-x-full'}`}
+    >
        {/* Header */}
        <div className="pt-safe-top px-4 py-3 flex items-center border-b border-border bg-background/95 backdrop-blur-sm sticky top-0">
-        <button onClick={onBack} className="text-zinc-400 hover:text-white mr-4 flex items-center gap-1">
+        <button onClick={handleBack} className="text-zinc-400 hover:text-white mr-4 flex items-center gap-1">
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
             <span className="text-lg">Rooms</span>
         </button>
@@ -106,6 +130,7 @@ export default function ProfileView({ currentUser, onBack, toggleTheme, isDarkMo
              )}
         </div>
 
+        {/* Username Display */}
         <h2 className="text-xl font-bold text-white mb-1">{username}</h2>
         <p className="text-zinc-500 text-sm">{currentUser.email}</p>
         <p className="text-blue-500 text-xs font-bold mt-2 uppercase tracking-wide">

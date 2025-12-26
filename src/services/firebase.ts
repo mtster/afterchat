@@ -35,11 +35,10 @@ export const auth = getAuth(app);
 export const db = getDatabase(app);
 export const googleProvider = new GoogleAuthProvider();
 
-// Force persistence to local to fix iOS PWA Redirects
-// We chain this to ensure it completes before other auth actions might occur
-setPersistence(auth, browserLocalPersistence)
-    .then(() => console.log("FIREBASE: Persistence set to LOCAL"))
-    .catch((err) => console.error("FIREBASE: Persistence Error", err));
+// Configure Google Provider parameters for PWA
+googleProvider.setCustomParameters({
+  prompt: 'select_account'
+});
 
 export const messaging = async () => {
   try {
@@ -63,17 +62,41 @@ export const updateUserProfile = async (uid: string, data: Partial<UserProfile>)
   }
 };
 
+export const getUserProfile = async (uid: string): Promise<UserProfile | null> => {
+  try {
+    const snapshot = await get(child(ref(db), `users/${uid}`));
+    if (snapshot.exists()) {
+      return snapshot.val() as UserProfile;
+    }
+    return null;
+  } catch (e) {
+    console.error("Failed to fetch user profile", e);
+    return null;
+  }
+};
+
+// SEARCH LOGIC
 export const findUserByEmailOrUsername = async (searchTerm: string): Promise<Roomer | null> => {
   const usersRef = ref(db, 'users');
+  const cleanTerm = searchTerm.trim();
   
   // 1. Try Email
-  let q = query(usersRef, orderByChild('email'), equalTo(searchTerm));
+  let q = query(usersRef, orderByChild('email'), equalTo(cleanTerm));
   let snapshot = await get(q);
   
-  // 2. Try Username if email failed
+  // 2. Try Username (Exact)
   if (!snapshot.exists()) {
-    q = query(usersRef, orderByChild('username'), equalTo(searchTerm));
+    // Ensure prefix is handled
+    const usernameTerm = cleanTerm.startsWith('$') ? cleanTerm : `$${cleanTerm}`;
+    q = query(usersRef, orderByChild('username'), equalTo(usernameTerm));
     snapshot = await get(q);
+  }
+
+  // 3. Try Username (Case-insensitive attempt is hard in Firebase, fallback to just adding $)
+  if (!snapshot.exists() && !cleanTerm.startsWith('$')) {
+      const usernameTerm = `$${cleanTerm}`;
+      q = query(usersRef, orderByChild('username'), equalTo(usernameTerm));
+      snapshot = await get(q);
   }
 
   if (snapshot.exists()) {
@@ -90,7 +113,7 @@ export const findUserByEmailOrUsername = async (searchTerm: string): Promise<Roo
   return null;
 };
 
-// BIDIRECTIONAL ADDING
+// ROOMER MANAGEMENT
 export const addRoomerToUser = async (currentUid: string, targetUid: string) => {
   const updates: any = {};
   // Add target to current user's list
@@ -104,9 +127,20 @@ export const addRoomerToUser = async (currentUid: string, targetUid: string) => 
 export const deleteRoomer = async (currentUid: string, targetUid: string) => {
     const updates: any = {};
     // Only remove from the current user's view (Contacts list)
-    // We do not remove from the other person to avoid griefing/confusion
+    // IMPORTANT: In a "Roomer" model, we usually just break the link for the deleter.
+    // However, per requirements, we want the OTHER person to know they were removed/blocked.
+    // We physically remove the entry from currentUid's list.
     updates[`users/${currentUid}/roomers/${targetUid}`] = null;
     await update(ref(db), updates);
+};
+
+// CHECK RELATIONSHIP (For Chat Blocking)
+// Returns TRUE if the target user still has current user in their roomers list.
+export const isUserBlockedByTarget = async (currentUid: string, targetUid: string): Promise<boolean> => {
+    const targetRoomerRef = child(ref(db), `users/${targetUid}/roomers/${currentUid}`);
+    const snapshot = await get(targetRoomerRef);
+    // If snapshot exists, they have us. If not, they deleted us (Blocked).
+    return !snapshot.exists();
 };
 
 export const getRoomerDetails = async (uid: string): Promise<Roomer | null> => {
