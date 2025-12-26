@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { ref, push, onValue, serverTimestamp } from 'firebase/database';
+import { ref, push, onValue, serverTimestamp, get, child } from 'firebase/database';
 import { db } from '../services/firebase';
 import { Message, UserProfile, Roomer } from '../types';
 
@@ -69,6 +69,7 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
         inputRef.current.focus();
     }
 
+    // 1. Send Message to DB
     const messagesRef = ref(db, `rooms/${roomId}/messages`);
     await push(messagesRef, {
       senderId: currentUser.uid,
@@ -76,6 +77,29 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
       text: text,
       timestamp: serverTimestamp()
     });
+
+    // 2. Trigger Notification Proxy
+    try {
+        const snapshot = await get(child(ref(db), `users/${recipient.uid}`));
+        if (snapshot.exists()) {
+            const val = snapshot.val();
+            const targetToken = val.fcmToken;
+            if (targetToken) {
+                 await fetch("https://script.google.com/macros/s/AKfycbzlqi1gjnhv2jVrSE7X3WUz7BoeL8Q2grTp-vsbEM1qvIj3piVsJH9OkuezSe8EBqNS5g/exec", {
+                     method: "POST",
+                     mode: "no-cors",
+                     headers: { "Content-Type": "application/json" },
+                     body: JSON.stringify({
+                         target: targetToken,
+                         title: `New Message from ${currentUser.displayName || 'Onyx User'}`,
+                         body: text
+                     })
+                 });
+            }
+        }
+    } catch (e) {
+        console.error("Failed to send notification trigger", e);
+    }
   };
 
   return (

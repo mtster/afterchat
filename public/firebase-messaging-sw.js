@@ -21,7 +21,7 @@ messaging.onBackgroundMessage((payload) => {
   const notificationTitle = payload.notification.title;
   const notificationOptions = {
     body: payload.notification.body,
-    icon: '/icon.png', // Ensure you have an icon in public/
+    icon: '/icon-192.png', // Correct local path
     // badge: '/badge.png'
   };
 
