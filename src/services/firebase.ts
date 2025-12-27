@@ -15,8 +15,12 @@ import {
   orderByChild, 
   equalTo 
 } from "firebase/database";
-import { getMessaging, isSupported } from "firebase/messaging";
+import { getMessaging, isSupported, getToken } from "firebase/messaging";
 import { UserProfile, Roomer } from "../types";
+
+// --- CONFIGURATION ---
+// PASTE YOUR VAPID KEY HERE (From Project Settings > Cloud Messaging > Web Push certs)
+export const VAPID_KEY = "YOUR_VAPID_KEY_HERE"; 
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -47,6 +51,46 @@ export const messaging = async () => {
   } catch (err) {
     console.warn("Firebase Messaging not supported.", err);
     return null;
+  }
+};
+
+// --- Notifications ---
+
+export const requestAndStoreToken = async (uid: string) => {
+  try {
+    const msg = await messaging();
+    if (!msg) {
+        console.log("Messaging not supported.");
+        return;
+    }
+
+    const permission = await Notification.requestPermission();
+    if (permission === 'granted') {
+        // We use the exported constant or env var fallback
+        const currentVapidKey = VAPID_KEY !== "YOUR_VAPID_KEY_HERE" 
+            ? VAPID_KEY 
+            : import.meta.env.VITE_FIREBASE_VAPID_KEY;
+
+        if (!currentVapidKey) {
+            console.warn("VAPID KEY is missing. Notifications will not work.");
+            return;
+        }
+
+        const token = await getToken(msg, {
+            vapidKey: currentVapidKey
+        });
+
+        if (token) {
+            console.log("FCM Token Generated:", token);
+            await update(ref(db, `users/${uid}`), { fcmToken: token });
+        } else {
+            console.log("No registration token available. Request permission to generate one.");
+        }
+    } else {
+        console.log("Notification permission denied.");
+    }
+  } catch (e) {
+      console.error("Notification permission/token error", e);
   }
 };
 

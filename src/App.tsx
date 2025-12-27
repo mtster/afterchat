@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { auth, updateUserProfile } from './services/firebase';
+import { auth, updateUserProfile, requestAndStoreToken } from './services/firebase';
 import { onAuthStateChanged, User, getRedirectResult, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import Login from './components/Login';
 import ChatView from './components/ChatView';
@@ -35,6 +35,8 @@ export default function App() {
                         photoURL: result.user.photoURL,
                         lastOnline: Date.now()
                     });
+                    // Trigger token request on login
+                    requestAndStoreToken(result.user.uid);
                 }
             } catch (e: any) {
                 console.error("[Auth] Redirect Error:", e.code, e.message);
@@ -46,6 +48,8 @@ export default function App() {
                 if (currentUser) {
                     setUser(currentUser);
                     setLoadingAuth(false);
+                    // Trigger token request on session restore
+                    requestAndStoreToken(currentUser.uid);
                 } else {
                     setUser(null);
                     setLoadingAuth(false);
