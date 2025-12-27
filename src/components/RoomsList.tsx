@@ -21,8 +21,15 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
   const [searchError, setSearchError] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   
-  // Notification State
-  const [notifPermission, setNotifPermission] = useState<NotificationPermission>(Notification.permission);
+  // Notification State - Safely initialized
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission>(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      return Notification.permission;
+    }
+    return 'default';
+  });
+
+  const supportsNotifications = typeof window !== 'undefined' && 'Notification' in window;
 
   useEffect(() => {
     const userRef = ref(db, `users/${currentUser.uid}`);
@@ -107,8 +114,10 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
   };
 
   const handleNotificationClick = async () => {
-    await setupNotifications(currentUser.uid);
-    setNotifPermission(Notification.permission);
+    if (supportsNotifications) {
+      await setupNotifications(currentUser.uid);
+      setNotifPermission(Notification.permission);
+    }
   };
 
   return (
@@ -121,13 +130,15 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
         <h1 className="text-2xl font-bold text-white tracking-tight">Rooms</h1>
         
         <div className="flex items-center gap-3">
-          <button 
-            onClick={handleNotificationClick}
-            className={`w-8 h-8 flex items-center justify-center rounded-full bg-zinc-800 hover:bg-zinc-700 active:scale-95 transition-all ${notifPermission === 'granted' ? 'text-green-500' : 'text-zinc-300'}`}
-            title="Enable Notifications"
-          >
-             <Bell size={18} />
-          </button>
+          {supportsNotifications && (
+            <button 
+                onClick={handleNotificationClick}
+                className={`w-8 h-8 flex items-center justify-center rounded-full bg-zinc-800 hover:bg-zinc-700 active:scale-95 transition-all ${notifPermission === 'granted' ? 'text-green-500' : 'text-zinc-300'}`}
+                title="Enable Notifications"
+            >
+                <Bell size={18} />
+            </button>
+          )}
 
           <button 
             onClick={() => setShowAddModal(true)}

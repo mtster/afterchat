@@ -60,6 +60,12 @@ export const messaging = async () => {
 
 export const requestAndStoreToken = async (uid: string) => {
   try {
+    // SAFETY CHECK: Ensure we are in a browser environment that supports Notifications
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+        console.log("Notifications not supported in this environment.");
+        return;
+    }
+
     const msg = await messaging();
     if (!msg) {
         console.log("Messaging not supported.");
