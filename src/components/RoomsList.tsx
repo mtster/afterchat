@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { db, findUserByEmailOrUsername, addRoomerToUser, getRoomerDetails, approveRoomer, deleteRoomer } from '../services/firebase';
+import { db, findUserByEmailOrUsername, addRoomerToUser, getRoomerDetails, approveRoomer, deleteRoomer, setupNotifications } from '../services/firebase';
 import { ref, onValue } from 'firebase/database';
 import { UserProfile, Roomer } from '../types';
+import { Bell } from 'lucide-react';
 
 interface Props {
   currentUser: UserProfile;
@@ -19,6 +20,9 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
   const [searchResult, setSearchResult] = useState<Roomer | null>(null);
   const [searchError, setSearchError] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  
+  // Notification State
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission>(Notification.permission);
 
   useEffect(() => {
     const userRef = ref(db, `users/${currentUser.uid}`);
@@ -102,6 +106,11 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
       }
   };
 
+  const handleNotificationClick = async () => {
+    await setupNotifications(currentUser.uid);
+    setNotifPermission(Notification.permission);
+  };
+
   return (
     <div className="flex flex-col w-full h-[100dvh] bg-background overflow-hidden">
       {/* Header - Sticky with Safe Area */}
@@ -112,6 +121,14 @@ export default function RoomsList({ currentUser, onNavigateChat, onNavigateProfi
         <h1 className="text-2xl font-bold text-white tracking-tight">Rooms</h1>
         
         <div className="flex items-center gap-3">
+          <button 
+            onClick={handleNotificationClick}
+            className={`w-8 h-8 flex items-center justify-center rounded-full bg-zinc-800 hover:bg-zinc-700 active:scale-95 transition-all ${notifPermission === 'granted' ? 'text-green-500' : 'text-zinc-300'}`}
+            title="Enable Notifications"
+          >
+             <Bell size={18} />
+          </button>
+
           <button 
             onClick={() => setShowAddModal(true)}
             className="w-8 h-8 flex items-center justify-center rounded-full bg-zinc-800 hover:bg-zinc-700 active:scale-95 transition-all text-zinc-300"

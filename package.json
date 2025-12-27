@@ -13,7 +13,8 @@
     "firebase": "^12.7.0",
     "vite": "^7.3.0",
     "@vitejs/plugin-react": "^5.1.2",
-    "react": "^19.2.3"
+    "react": "^19.2.3",
+    "lucide-react": "0.300.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

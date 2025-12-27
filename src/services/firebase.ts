@@ -2,6 +2,8 @@ import { initializeApp, getApps, getApp } from "firebase/app";
 import { 
   getAuth, 
   GoogleAuthProvider,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
   setPersistence,
   browserLocalPersistence
 } from "firebase/auth";
@@ -93,6 +95,13 @@ export const requestAndStoreToken = async (uid: string) => {
       console.error("Notification permission/token error", e);
   }
 };
+
+export const setupNotifications = requestAndStoreToken;
+
+// --- Auth Helpers ---
+
+export const signInWithEmail = (email: string, pass: string) => signInWithEmailAndPassword(auth, email, pass);
+export const signUpWithEmail = (email: string, pass: string) => createUserWithEmailAndPassword(auth, email, pass);
 
 // --- User Management ---
 
