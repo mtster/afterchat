@@ -18,12 +18,16 @@ const messaging = firebase.messaging();
 messaging.onBackgroundMessage((payload) => {
   console.log('[firebase-messaging-sw.js] Received background message ', payload);
   
-  const notificationTitle = payload.notification.title;
-  const notificationOptions = {
-    body: payload.notification.body,
-    icon: '/icon-192.png', // Correct local path
-    // badge: '/badge.png'
-  };
+  // We now use data-only payloads to prevent duplicate notifications 
+  // (browser defaults vs service worker).
+  if (payload.data) {
+    const notificationTitle = payload.data.title;
+    const notificationOptions = {
+      body: payload.data.body,
+      icon: '/icon-192.png',
+      // badge: '/badge.png'
+    };
 
-  self.registration.showNotification(notificationTitle, notificationOptions);
+    self.registration.showNotification(notificationTitle, notificationOptions);
+  }
 });

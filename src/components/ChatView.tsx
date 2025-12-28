@@ -80,19 +80,26 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
 
     // 2. Trigger Notification Proxy
     try {
+        // Fetch sender details (Me) to get the correct username/display name
+        const mySnapshot = await get(child(ref(db), `users/${currentUser.uid}`));
+        const myData = mySnapshot.exists() ? mySnapshot.val() : {};
+
+        // Fetch recipient details to get the token
         const snapshot = await get(child(ref(db), `users/${recipient.uid}`));
         if (snapshot.exists()) {
             const val = snapshot.val();
             const targetToken = val.fcmToken;
             if (targetToken) {
-                 await fetch("https://script.google.com/macros/s/AKfycbzlqi1gjnhv2jVrSE7X3WUz7BoeL8Q2grTp-vsbEM1qvIj3piVsJH9OkuezSe8EBqNS5g/exec", {
+                 await fetch("https://script.google.com/macros/s/AKfycbzs2tRXKJHiZjlzvIoahPaQBg02d2x2JjQ83uqjjr2csCdUaXTtAJm6_aJYuhjBu2LyUg/exec", {
                      method: "POST",
                      mode: "no-cors",
                      headers: { "Content-Type": "application/json" },
                      body: JSON.stringify({
-                         target: targetToken,
-                         title: `New Message from ${currentUser.displayName || 'Onyx User'}`,
-                         body: text
+                         targetToken: targetToken,
+                         senderUsername: myData.username || '',
+                         senderDisplayName: myData.displayName || currentUser.displayName || 'Onyx User',
+                         senderEmail: myData.email || currentUser.email || '',
+                         messageText: text
                      })
                  });
             }
