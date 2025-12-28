@@ -117,7 +117,6 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
 
             console.log(`[Notif_Debug] Recipient found.`);
             console.log(`[Notif_Debug] Token exists: ${!!targetToken ? 'YES' : 'NO'}`);
-            console.log(`[Notif_Debug] Token Value (first 10 chars): ${targetToken ? targetToken.substring(0, 10) + '...' : 'N/A'}`);
             console.log(`[Notif_Debug] Recipient Active Room: ${recipientActiveRoom || 'None'}`);
             console.log(`[Notif_Debug] Current Room ID: ${roomId}`);
 
@@ -139,7 +138,8 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
                      senderUsername: cleanUsername,
                      senderDisplayName: myData.displayName || currentUser.displayName || 'Rooms User',
                      senderEmail: myData.email || currentUser.email || '',
-                     messageText: text
+                     messageText: text,
+                     roomId: roomId // ADDED THIS to help frontend know which chat this is
                  };
 
                  console.log("[Notif_Debug] Sending JSON Payload:", JSON.stringify(payload));
@@ -148,11 +148,11 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
                  const res = await fetch("https://script.google.com/macros/s/AKfycbz0NjB2LCQ08BiEdvyvxZCQw0dntXhVs68u51xZWdSZ3VnllLXBRn83AXlDAYPd-d-GfQ/exec", {
                      method: "POST",
                      mode: "no-cors",
-                     headers: { "Content-Type": "text/plain;charset=utf-8" }, // Changed to text/plain to avoid preflight issues in some envs
+                     headers: { "Content-Type": "text/plain;charset=utf-8" },
                      body: JSON.stringify(payload)
                  });
                  
-                 console.log(`[Notif_Debug] Fetch executed. Status (opaque due to no-cors): ${res.status}`);
+                 console.log(`[Notif_Debug] Fetch executed. Status (opaque): ${res.status}`);
             } else {
                  if (!targetToken) console.log("[Notif_Debug] Skipped: No target token.");
                  if (recipientActiveRoom === roomId) console.log("[Notif_Debug] Skipped: User is currently active in this room.");

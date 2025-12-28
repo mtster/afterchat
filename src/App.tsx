@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { auth, updateUserProfile, requestAndStoreToken, onMessageListener } from './services/firebase';
 import { onAuthStateChanged, User, getRedirectResult, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import Login from './components/Login';
@@ -21,11 +21,15 @@ export default function App() {
     }
   });
 
+  // Ref to track view inside event listeners without closure staleness
+  const viewRef = useRef<AppView>(view);
+
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [loadingAuth, setLoadingAuth] = useState(true);
 
   useEffect(() => {
     localStorage.setItem('onyx_app_view', JSON.stringify(view));
+    viewRef.current = view;
   }, [view]);
 
   // 1. Auth Init & Hydration
@@ -85,22 +89,34 @@ export default function App() {
         
         let title = "New Message";
         let body = "You have a new message";
+        let roomId = "";
 
-        if (payload.data && payload.data.title) {
-            title = payload.data.title;
-            body = payload.data.body || body;
-        } else if (payload.notification) {
+        if (payload.notification) {
             title = payload.notification.title || title;
             body = payload.notification.body || body;
         }
+        
+        if (payload.data) {
+            if (payload.data.roomId) roomId = payload.data.roomId;
+            // Fallback for title/body if notification block missing
+            if (!payload.notification) {
+                title = payload.data.title || title;
+                body = payload.data.body || body;
+            }
+        }
 
-        // Manually show notification because browser suppresses it in foreground
-        // and we want user to see it if they are looking at a different room list
-        if (Notification.permission === 'granted') {
-            new Notification(title, {
-                body: body,
-                icon: '/icon-192.png'
-            });
+        // INTELLIGENT NOTIFICATION:
+        // Only show if we are NOT in the specific chat room of the incoming message.
+        const currentView = viewRef.current;
+        const isChattingWithSender = currentView.name === 'CHAT' && currentView.roomId === roomId;
+
+        if (!isChattingWithSender) {
+             if (Notification.permission === 'granted') {
+                new Notification(title, {
+                    body: body,
+                    icon: '/icon-192.png'
+                });
+            }
         }
     });
 
