@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { ref, push, onValue, serverTimestamp, get, child } from 'firebase/database';
+import { ref, push, onValue, serverTimestamp, get, child, update, onDisconnect } from 'firebase/database';
 import { db } from '../services/firebase';
 import { Message, UserProfile, Roomer } from '../types';
 
@@ -28,6 +28,25 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
     const timer = setTimeout(() => setIsVisible(true), 10);
     return () => clearTimeout(timer);
   }, []);
+
+  // Presence Logic: Track Active Room
+  useEffect(() => {
+    if (!currentUser.uid) return;
+
+    const userRef = ref(db, `users/${currentUser.uid}`);
+    
+    // 1. Set active room immediately upon entering
+    update(userRef, { activeRoom: roomId });
+
+    // 2. Set Disconnect Hook (if they close tab/app abruptly)
+    onDisconnect(userRef).update({ activeRoom: null });
+
+    return () => {
+      // 3. Clear on clean unmount (navigation/back button)
+      update(userRef, { activeRoom: null });
+      onDisconnect(userRef).cancel();
+    };
+  }, [roomId, currentUser.uid]);
 
   const handleBack = () => {
     setIsVisible(false);
@@ -80,21 +99,25 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
 
     // 2. Trigger Notification Proxy
     try {
-        // Fetch sender details (Me) to get the correct username/display name
-        const mySnapshot = await get(child(ref(db), `users/${currentUser.uid}`));
-        const myData = mySnapshot.exists() ? mySnapshot.val() : {};
-
-        // Fetch recipient details to get the token
+        // Fetch recipient details to get the token AND their activeRoom
         const snapshot = await get(child(ref(db), `users/${recipient.uid}`));
         if (snapshot.exists()) {
             const val = snapshot.val();
             const targetToken = val.fcmToken;
-            if (targetToken) {
+            const recipientActiveRoom = val.activeRoom;
+
+            // CONDITION: Only send if recipient is NOT currently in this room
+            if (targetToken && recipientActiveRoom !== roomId) {
+                 
+                 // Fetch sender details (Me) for the notification text
+                 const mySnapshot = await get(child(ref(db), `users/${currentUser.uid}`));
+                 const myData = mySnapshot.exists() ? mySnapshot.val() : {};
+
                  // Clean username: Remove '$' prefix if present
                  const rawUsername = myData.username || '';
                  const cleanUsername = rawUsername.startsWith('$') ? rawUsername.substring(1) : rawUsername;
 
-                 await fetch("https://script.google.com/macros/s/AKfycbzTYS0pCyGVSFmfNNsT1XAppP5iZlsMyG6U9m7hqCBDH0GK6v6GMeqggwIit5Icke-jwg/exec", {
+                 await fetch("https://script.google.com/macros/s/AKfycbyrhTIBFuz-sSy4-xmE8rBhPRGCjvD8kSyCRGsOLRwY5XTyXXYKWNpG-UgJHU593eYvMA/exec", {
                      method: "POST",
                      mode: "no-cors",
                      headers: { "Content-Type": "application/json" },

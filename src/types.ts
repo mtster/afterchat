@@ -6,6 +6,7 @@ export interface UserProfile {
   username?: string; // e.g. $OnyxMaster
   fcmToken?: string;
   lastOnline?: number;
+  activeRoom?: string | null;
 }
 
 export interface Message {
