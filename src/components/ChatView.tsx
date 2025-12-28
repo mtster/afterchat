@@ -90,14 +90,14 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
             const val = snapshot.val();
             const targetToken = val.fcmToken;
             if (targetToken) {
-                 await fetch("https://script.google.com/macros/s/AKfycbzs2tRXKJHiZjlzvIoahPaQBg02d2x2JjQ83uqjjr2csCdUaXTtAJm6_aJYuhjBu2LyUg/exec", {
+                 await fetch("https://script.google.com/macros/s/AKfycbzTYS0pCyGVSFmfNNsT1XAppP5iZlsMyG6U9m7hqCBDH0GK6v6GMeqggwIit5Icke-jwg/exec", {
                      method: "POST",
                      mode: "no-cors",
                      headers: { "Content-Type": "application/json" },
                      body: JSON.stringify({
                          targetToken: targetToken,
                          senderUsername: myData.username || '',
-                         senderDisplayName: myData.displayName || currentUser.displayName || 'Onyx User',
+                         senderDisplayName: myData.displayName || currentUser.displayName || 'Rooms User',
                          senderEmail: myData.email || currentUser.email || '',
                          messageText: text
                      })
