@@ -105,6 +105,8 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
 
     // 2. Trigger Notification Proxy
     try {
+        console.log(`[Notif_Debug] Starting trigger for msg: "${text}"`);
+        
         // Fetch recipient details to get the token AND their activeRoom
         const snapshot = await get(child(ref(db), `users/${recipient.uid}`));
         if (snapshot.exists()) {
@@ -112,9 +114,13 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
             const targetToken = val.fcmToken;
             const recipientActiveRoom = val.activeRoom;
 
+            console.log(`[Notif_Debug] Recipient found. Token exists: ${!!targetToken}. ActiveRoom: ${recipientActiveRoom}. CurrentRoom: ${roomId}`);
+
             // CONDITION: Only send if recipient is NOT currently in this room
             if (targetToken && recipientActiveRoom !== roomId) {
                  
+                 console.log("[Notif_Debug] Condition met (Recipient away). Preparing fetch...");
+
                  // Fetch sender details (Me) for the notification text
                  const mySnapshot = await get(child(ref(db), `users/${currentUser.uid}`));
                  const myData = mySnapshot.exists() ? mySnapshot.val() : {};
@@ -123,22 +129,32 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
                  const rawUsername = myData.username || '';
                  const cleanUsername = rawUsername.startsWith('$') ? rawUsername.substring(1) : rawUsername;
 
-                 await fetch("https://script.google.com/macros/s/AKfycbz_X_3ixBZbEexLpaoLkQAIQuy7HyB37lgoR6qJBjX8dn_FinQByFKq97_N8c0u5jxAkg/exec", {
+                 const payload = {
+                     targetToken: targetToken,
+                     senderUsername: cleanUsername,
+                     senderDisplayName: myData.displayName || currentUser.displayName || 'Rooms User',
+                     senderEmail: myData.email || currentUser.email || '',
+                     messageText: text
+                 };
+
+                 console.log("[Notif_Debug] Sending Payload:", JSON.stringify(payload));
+
+                 const res = await fetch("https://script.google.com/macros/s/AKfycbz_X_3ixBZbEexLpaoLkQAIQuy7HyB37lgoR6qJBjX8dn_FinQByFKq97_N8c0u5jxAkg/exec", {
                      method: "POST",
                      mode: "no-cors",
                      headers: { "Content-Type": "application/json" },
-                     body: JSON.stringify({
-                         targetToken: targetToken,
-                         senderUsername: cleanUsername,
-                         senderDisplayName: myData.displayName || currentUser.displayName || 'Rooms User',
-                         senderEmail: myData.email || currentUser.email || '',
-                         messageText: text
-                     })
+                     body: JSON.stringify(payload)
                  });
+                 
+                 console.log(`[Notif_Debug] Fetch executed. Status (opaque): ${res.status}`);
+            } else {
+                 console.log("[Notif_Debug] Skipped. Either no token or recipient is active in room.");
             }
+        } else {
+             console.log("[Notif_Debug] Recipient user data does not exist in DB.");
         }
     } catch (e) {
-        console.error("Failed to send notification trigger", e);
+        console.error("[Notif_Debug] FATAL ERROR in handleSend:", e);
     }
   };
 

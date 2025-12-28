@@ -17,20 +17,21 @@ firebase.initializeApp(firebaseConfig);
 const messaging = firebase.messaging();
 
 // Handles background messages.
-// Note: If the payload contains a 'notification' key, the browser handles the notification
-// automatically, and this callback may not be invoked (or may be invoked after).
-// We use this primarily if we need to handle data-only messages in background
-// or want to override behavior (though browser behavior for 'notification' key is dominant).
+// We are using DATA ONLY payloads now to ensure the Service Worker always fires.
 messaging.onBackgroundMessage(async (payload) => {
   console.log('[firebase-messaging-sw.js] Received background message ', payload);
 
-  // If the payload is data-only (no 'notification' key), we must show it manually.
-  // If it HAS a 'notification' key, the browser shows it.
-  if (payload.data && !payload.notification) {
-      const notificationTitle = payload.data.title || "New Message";
+  // Check for data property
+  if (payload.data) {
+      const notificationTitle = payload.data.title || "Rooms";
+      const notificationBody = payload.data.body || "New Message";
+      
       const notificationOptions = {
-        body: payload.data.body,
-        icon: '/icon-192.png'
+        body: notificationBody,
+        icon: '/icon-192.png',
+        badge: '/icon-192.png',
+        tag: 'message-notification', // Overwrites previous notifications
+        renotify: true
       };
       
       return self.registration.showNotification(notificationTitle, notificationOptions);

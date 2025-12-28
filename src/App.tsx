@@ -82,18 +82,25 @@ export default function App() {
     // This catches messages when the app is OPEN.
     onMessageListener((payload) => {
         console.log("Received foreground message:", payload);
+        
+        let title = "New Message";
+        let body = "";
+
         if (payload.notification) {
-            const { title, body } = payload.notification;
+            title = payload.notification.title || title;
+            body = payload.notification.body || body;
+        } else if (payload.data) {
+            title = payload.data.title || title;
+            body = payload.data.body || body;
+        }
+
+        if (body) {
             // Manually show notification because browser suppresses it in foreground
             if (Notification.permission === 'granted') {
-                new Notification(title || 'New Message', {
+                new Notification(title, {
                     body: body,
                     icon: '/icon-192.png'
                 });
-            } else {
-                // Fallback: simple alert or in-app toast
-                // For now, let's use console or potentially a state-based toast in future.
-                // alert(`${title}: ${body}`); // Alert is too intrusive, stick to Notification API
             }
         }
     });
