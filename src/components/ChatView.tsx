@@ -123,7 +123,7 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
                  const rawUsername = myData.username || '';
                  const cleanUsername = rawUsername.startsWith('$') ? rawUsername.substring(1) : rawUsername;
 
-                 await fetch("https://script.google.com/macros/s/AKfycbyrhTIBFuz-sSy4-xmE8rBhPRGCjvD8kSyCRGsOLRwY5XTyXXYKWNpG-UgJHU593eYvMA/exec", {
+                 await fetch("https://script.google.com/macros/s/AKfycbz_X_3ixBZbEexLpaoLkQAIQuy7HyB37lgoR6qJBjX8dn_FinQByFKq97_N8c0u5jxAkg/exec", {
                      method: "POST",
                      mode: "no-cors",
                      headers: { "Content-Type": "application/json" },
