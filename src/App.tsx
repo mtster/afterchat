@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { auth, updateUserProfile, requestAndStoreToken } from './services/firebase';
+import { auth, updateUserProfile, requestAndStoreToken, onMessageListener } from './services/firebase';
 import { onAuthStateChanged, User, getRedirectResult, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import Login from './components/Login';
 import ChatView from './components/ChatView';
@@ -77,6 +77,26 @@ export default function App() {
     };
 
     initAuth();
+    
+    // 2. Foreground Message Listener
+    // This catches messages when the app is OPEN.
+    onMessageListener((payload) => {
+        console.log("Received foreground message:", payload);
+        if (payload.notification) {
+            const { title, body } = payload.notification;
+            // Manually show notification because browser suppresses it in foreground
+            if (Notification.permission === 'granted') {
+                new Notification(title || 'New Message', {
+                    body: body,
+                    icon: '/icon-192.png'
+                });
+            } else {
+                // Fallback: simple alert or in-app toast
+                // For now, let's use console or potentially a state-based toast in future.
+                // alert(`${title}: ${body}`); // Alert is too intrusive, stick to Notification API
+            }
+        }
+    });
 
     return () => {
         if (unsubscribe) unsubscribe();

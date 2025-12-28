@@ -17,7 +17,7 @@ import {
   orderByChild, 
   equalTo 
 } from "firebase/database";
-import { getMessaging, isSupported, getToken } from "firebase/messaging";
+import { getMessaging, isSupported, getToken, onMessage, MessagePayload } from "firebase/messaging";
 import { UserProfile, Roomer } from "../types";
 
 // --- CONFIGURATION ---
@@ -81,7 +81,7 @@ export const requestAndStoreToken = async (uid: string) => {
 
         if (!currentVapidKey) {
             console.warn("VAPID KEY is missing. Notifications will not work.");
-            return;
+            // We continue without VAPID, sometimes works if config is perfect, but unreliable.
         }
 
         const token = await getToken(msg, {
@@ -103,6 +103,17 @@ export const requestAndStoreToken = async (uid: string) => {
 };
 
 export const setupNotifications = requestAndStoreToken;
+
+// FOREGROUND LISTENER
+export const onMessageListener = async (callback: (payload: MessagePayload) => void) => {
+  const msg = await messaging();
+  if (msg) {
+    onMessage(msg, (payload) => {
+      console.log("[Firebase] Foreground Message Received:", payload);
+      callback(payload);
+    });
+  }
+};
 
 // --- Auth Helpers ---
 
