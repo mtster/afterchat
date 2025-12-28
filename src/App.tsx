@@ -84,24 +84,23 @@ export default function App() {
         console.log("Received foreground message:", payload);
         
         let title = "New Message";
-        let body = "";
+        let body = "You have a new message";
 
-        if (payload.notification) {
+        if (payload.data && payload.data.title) {
+            title = payload.data.title;
+            body = payload.data.body || body;
+        } else if (payload.notification) {
             title = payload.notification.title || title;
             body = payload.notification.body || body;
-        } else if (payload.data) {
-            title = payload.data.title || title;
-            body = payload.data.body || body;
         }
 
-        if (body) {
-            // Manually show notification because browser suppresses it in foreground
-            if (Notification.permission === 'granted') {
-                new Notification(title, {
-                    body: body,
-                    icon: '/icon-192.png'
-                });
-            }
+        // Manually show notification because browser suppresses it in foreground
+        // and we want user to see it if they are looking at a different room list
+        if (Notification.permission === 'granted') {
+            new Notification(title, {
+                body: body,
+                icon: '/icon-192.png'
+            });
         }
     });
 

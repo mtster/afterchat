@@ -1,8 +1,7 @@
 importScripts('https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/9.22.0/firebase-messaging-compat.js');
 
-// Hardcoded Config for Service Worker
-// NOTE: Make sure these match your project settings
+// Config for Service Worker
 const firebaseConfig = {
   apiKey: "AIzaSyDySZZawrO-SMWtEEYlQJca82uxr9uDPt0",
   authDomain: "afterchat.firebaseapp.com",
@@ -16,24 +15,54 @@ firebase.initializeApp(firebaseConfig);
 
 const messaging = firebase.messaging();
 
-// Handles background messages.
-// We are using DATA ONLY payloads now to ensure the Service Worker always fires.
+// Handles background messages (when app is closed or hidden)
 messaging.onBackgroundMessage(async (payload) => {
   console.log('[firebase-messaging-sw.js] Received background message ', payload);
 
-  // Check for data property
+  // Fallback default values
+  let title = "Onyx Message";
+  let body = "You have a new message.";
+
+  // Extract from data payload (preferred for PWAs to force wake-up)
   if (payload.data) {
-      const notificationTitle = payload.data.title || "Rooms";
-      const notificationBody = payload.data.body || "New Message";
-      
-      const notificationOptions = {
-        body: notificationBody,
-        icon: '/icon-192.png',
-        badge: '/icon-192.png',
-        tag: 'message-notification', // Overwrites previous notifications
-        renotify: true
-      };
-      
-      return self.registration.showNotification(notificationTitle, notificationOptions);
+      title = payload.data.title || title;
+      body = payload.data.body || body;
+  } 
+  // Extract from notification payload (if present)
+  else if (payload.notification) {
+      title = payload.notification.title || title;
+      body = payload.notification.body || body;
   }
+
+  const notificationOptions = {
+    body: body,
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
+    tag: 'onyx-message',
+    renotify: true,
+    data: payload.data // Pass data to click handler if needed later
+  };
+  
+  // Explicitly show notification to ensure it appears
+  return self.registration.showNotification(title, notificationOptions);
+});
+
+// Optional: Handle notification click
+self.addEventListener('notificationclick', function(event) {
+  event.notification.close();
+  // Open the app
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(clientList) {
+      if (clientList.length > 0) {
+        let client = clientList[0];
+        for (let i = 0; i < clientList.length; i++) {
+          if (clientList[i].focused) {
+            client = clientList[i];
+          }
+        }
+        return client.focus();
+      }
+      return clients.openWindow('/');
+    })
+  );
 });
