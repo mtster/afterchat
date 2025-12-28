@@ -34,17 +34,23 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
     if (!currentUser.uid) return;
 
     const userRef = ref(db, `users/${currentUser.uid}`);
+    const connectedRef = ref(db, '.info/connected');
     
-    // 1. Set active room immediately upon entering
-    update(userRef, { activeRoom: roomId });
-
-    // 2. Set Disconnect Hook (if they close tab/app abruptly)
-    onDisconnect(userRef).update({ activeRoom: null });
+    // Listen for connection state changes
+    const unsubscribe = onValue(connectedRef, (snap) => {
+        if (snap.val() === true) {
+            // We are connected.
+            // 1. Establish Presence
+            update(userRef, { activeRoom: roomId });
+            // 2. Queue disconnect clean up
+            onDisconnect(userRef).update({ activeRoom: null });
+        }
+    });
 
     return () => {
-      // 3. Clear on clean unmount (navigation/back button)
+      unsubscribe();
+      // Clear on clean unmount
       update(userRef, { activeRoom: null });
-      onDisconnect(userRef).cancel();
     };
   }, [roomId, currentUser.uid]);
 

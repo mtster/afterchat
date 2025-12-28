@@ -10,9 +10,23 @@ import { UserProfile, AppView, Roomer } from './types';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
-  const [view, setView] = useState<AppView>({ name: 'ROOMS_LIST' });
+  
+  // Persist the current view to LocalStorage so app state survives reloads/re-opens
+  const [view, setView] = useState<AppView>(() => {
+    try {
+        const saved = localStorage.getItem('onyx_app_view');
+        return saved ? JSON.parse(saved) : { name: 'ROOMS_LIST' };
+    } catch (e) {
+        return { name: 'ROOMS_LIST' };
+    }
+  });
+
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [loadingAuth, setLoadingAuth] = useState(true);
+
+  useEffect(() => {
+    localStorage.setItem('onyx_app_view', JSON.stringify(view));
+  }, [view]);
 
   // 1. Auth Init & Hydration
   useEffect(() => {
