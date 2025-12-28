@@ -143,9 +143,10 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
                  };
 
                  console.log("[Notif_Debug] Sending JSON Payload:", JSON.stringify(payload));
-                 console.log("[Notif_Debug] URL: https://script.google.com/macros/s/AKfycbz0NjB2LCQ08BiEdvyvxZCQw0dntXhVs68u51xZWdSZ3VnllLXBRn83AXlDAYPd-d-GfQ/exec");
+                 const scriptUrl = "https://script.google.com/macros/s/AKfycbyYT6o7oa_HYk_p1qCAaXJKqxdKdcTNw0G6b3SxEmHgxqjUVf7cFmQjmG6oLyZEP6VVLg/exec";
+                 console.log("[Notif_Debug] URL:", scriptUrl);
 
-                 const res = await fetch("https://script.google.com/macros/s/AKfycbz0NjB2LCQ08BiEdvyvxZCQw0dntXhVs68u51xZWdSZ3VnllLXBRn83AXlDAYPd-d-GfQ/exec", {
+                 const res = await fetch(scriptUrl, {
                      method: "POST",
                      mode: "no-cors",
                      headers: { "Content-Type": "text/plain;charset=utf-8" },
