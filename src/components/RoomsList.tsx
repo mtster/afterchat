@@ -16,7 +16,6 @@ interface Props {
 export default function RoomsList({ currentUser, roomers, loading, onNavigateChat, onNavigateProfile }: Props) {
   const [showAddModal, setShowAddModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [searchResult, setSearchResult] = useState<Roomer | null>(null);
   const [searchError, setSearchError] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [hasFcmToken, setHasFcmToken] = useState(false);
@@ -29,52 +28,54 @@ export default function RoomsList({ currentUser, roomers, loading, onNavigateCha
     return () => unsub();
   }, [currentUser.uid]);
 
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddFlow = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     const term = searchTerm.trim();
-    if (!term) return;
+    if (!term || isProcessing) return;
 
+    console.log("[Add_Flow] Start processing for term:", term);
     setSearchError('');
-    setSearchResult(null);
     setIsProcessing(true);
     
     try {
-      console.log("[Search] Looking for:", term);
+      // Step 1: Search for the user
       const result = await findUserByEmailOrUsername(term);
-      if (result) {
-        console.log("[Search] Result found:", result.uid);
-        if (result.uid === currentUser.uid) {
-            setSearchError("You cannot add yourself.");
-        } else {
-            const exists = roomers.find(r => r.uid === result.uid);
-            if (exists) {
-                setSearchError("User already in your rooms.");
-            } else {
-                setSearchResult(result);
-            }
-        }
-      } else {
-        setSearchError('User not found.');
+      
+      if (!result) {
+        console.warn("[Add_Flow] User not found.");
+        setSearchError("A roomer with these credentials doesn't exist. Try correct username, display name, or email.");
+        setIsProcessing(false);
+        return;
       }
-    } catch (err: any) {
-      setSearchError("Search failed.");
-    } finally {
-      setIsProcessing(false);
-    }
-  };
 
-  const handleAddUser = async () => {
-    if (!searchResult || isProcessing) return;
-    
-    setIsProcessing(true);
-    console.log("[Add_Roomer] Triggering for UID:", searchResult.uid);
-    try {
-      await addRoomerToUser(currentUser.uid, searchResult.uid);
+      // Step 2: Validate relationship
+      if (result.uid === currentUser.uid) {
+        console.warn("[Add_Flow] Self-add detected.");
+        setSearchError("You cannot add yourself.");
+        setIsProcessing(false);
+        return;
+      }
+
+      const alreadyExists = roomers.find(r => r.uid === result.uid);
+      if (alreadyExists) {
+        console.warn("[Add_Flow] User already in list.");
+        setSearchError("User is already in your rooms.");
+        setIsProcessing(false);
+        return;
+      }
+
+      // Step 3: Add the user
+      console.log("[Add_Flow] Match confirmed. Adding UID:", result.uid);
+      await addRoomerToUser(currentUser.uid, result.uid);
+      
+      // Step 4: Success, close modal
+      console.log("[Add_Flow] Success. Closing modal.");
       setShowAddModal(false);
       setSearchTerm('');
-      setSearchResult(null);
+      setSearchError('');
     } catch (err: any) {
-      alert("Error adding roomer: " + err.message);
+      console.error("[Add_Flow] Error occurred:", err.message);
+      setSearchError("An unexpected error occurred. Please try again.");
     } finally {
       setIsProcessing(false);
     }
@@ -145,49 +146,56 @@ export default function RoomsList({ currentUser, roomers, loading, onNavigateCha
 
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-2xl">
-            <h2 className="text-lg font-semibold text-white mb-4">Find Roomer</h2>
-            <form onSubmit={handleSearch} className="mb-4">
-               <input 
-                 type="text" 
-                 placeholder="Email or Username" 
-                 value={searchTerm} 
-                 onChange={(e) => setSearchTerm(e.target.value)} 
-                 className="w-full bg-black border border-zinc-700 rounded-xl px-4 py-3 text-white placeholder-zinc-600 focus:border-white transition-colors" 
-                 autoFocus 
-               />
-               <button type="submit" className="hidden" />
+          <div className="w-full max-w-sm bg-zinc-950 border border-zinc-800 rounded-3xl p-6 shadow-2xl ring-1 ring-white/5">
+            <h2 className="text-xl font-bold text-white mb-2">Find Roomer</h2>
+            <p className="text-zinc-500 text-sm mb-6">Search by username, display name, or email address.</p>
+            
+            <form onSubmit={handleAddFlow} className="space-y-4">
+               <div className="relative">
+                 <input 
+                   type="text" 
+                   placeholder="Enter details..." 
+                   value={searchTerm} 
+                   onChange={(e) => {
+                       setSearchTerm(e.target.value);
+                       if (searchError) setSearchError('');
+                   }} 
+                   className="w-full bg-black border border-zinc-800 rounded-2xl px-5 py-4 text-white placeholder-zinc-700 focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500 transition-all outline-none" 
+                   autoFocus 
+                   autoComplete="off"
+                   disabled={isProcessing}
+                 />
+                 {isProcessing && (
+                     <div className="absolute right-4 top-1/2 -translate-y-1/2">
+                        <div className="w-5 h-5 border-2 border-zinc-800 border-t-white animate-spin rounded-full"></div>
+                     </div>
+                 )}
+               </div>
+               
+               {searchError && (
+                 <div className="px-1 animate-in fade-in slide-in-from-top-1">
+                    <p className="text-red-400 text-xs leading-relaxed">{searchError}</p>
+                 </div>
+               )}
+               
+               <div className="flex gap-3 pt-2">
+                  <button 
+                      type="button"
+                      onClick={() => { setShowAddModal(false); setSearchError(''); setSearchTerm(''); }} 
+                      className="flex-1 py-4 text-sm font-bold text-zinc-500 bg-zinc-900 rounded-2xl active:scale-95 transition-all hover:text-white"
+                      disabled={isProcessing}
+                  >
+                      Cancel
+                  </button>
+                  <button 
+                      type="submit"
+                      disabled={!searchTerm.trim() || isProcessing} 
+                      className={`flex-1 py-4 text-sm font-bold rounded-2xl active:scale-95 transition-all ${(!searchTerm.trim() || isProcessing) ? 'bg-zinc-900 text-zinc-800' : 'bg-white text-black'}`}
+                  >
+                      {isProcessing ? 'Checking...' : 'Add'}
+                  </button>
+               </div>
             </form>
-            
-            {searchError && <p className="text-red-400 text-sm mb-4 text-center">{searchError}</p>}
-            
-            {searchResult && (
-              <div className="bg-black/50 rounded-xl p-3 flex items-center gap-3 mb-4 border border-zinc-800">
-                <div className="w-10 h-10 rounded-full bg-zinc-800 overflow-hidden shrink-0">
-                    {searchResult.photoURL ? <img src={searchResult.photoURL} className="w-full h-full object-cover" /> : <div className="w-full h-full bg-zinc-800" />}
-                </div>
-                <div className="overflow-hidden flex-1 text-left">
-                    <p className="text-white font-medium truncate">{searchResult.displayName}</p>
-                    <p className="text-zinc-500 text-xs truncate">{searchResult.email}</p>
-                </div>
-              </div>
-            )}
-            
-            <div className="flex gap-3">
-                <button 
-                    onClick={() => { setShowAddModal(false); setSearchResult(null); setSearchError(''); setSearchTerm(''); }} 
-                    className="flex-1 py-3 text-sm font-medium text-zinc-400 bg-zinc-800 rounded-xl active:scale-95 transition-transform"
-                >
-                    Cancel
-                </button>
-                <button 
-                    onClick={handleAddUser} 
-                    disabled={!searchResult || isProcessing} 
-                    className={`flex-1 py-3 text-sm font-medium rounded-xl active:scale-95 transition-transform ${(!searchResult || isProcessing) ? 'bg-zinc-800 text-zinc-600 opacity-50' : 'bg-white text-black'}`}
-                >
-                    {isProcessing ? 'Adding...' : 'Add'}
-                </button>
-            </div>
           </div>
         </div>
       )}
