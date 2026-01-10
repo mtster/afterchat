@@ -75,13 +75,14 @@ export const onMessageListener = async (callback: (payload: MessagePayload) => v
 };
 
 export const updateUserProfile = async (uid: string, data: Partial<UserProfile>, retryCount = 0) => {
-  console.log(`[Profile_Sync] Updating roomers/${uid}... Attempt ${retryCount + 1}`);
+  console.log(`[Profile_Sync] Updating roomers/${uid}... (Attempt ${retryCount + 1})`);
   try {
     const userRef = ref(db, `roomers/${uid}`);
     await update(userRef, data);
     console.log("[Profile_Sync] SUCCESS");
   } catch (e: any) {
     if (e.code === 'PERMISSION_DENIED' && retryCount < 3) {
+        console.warn("[Profile_Sync] Permission Denied. Retrying in 1s...");
         await new Promise(r => setTimeout(r, 1000));
         return updateUserProfile(uid, data, retryCount + 1);
     }
@@ -100,93 +101,96 @@ export const getUserProfile = async (uid: string): Promise<UserProfile | null> =
 };
 
 /**
- * Searches for a user by Email, Username, or Display Name
+ * Searches across Email, Username, and Display Name
  */
 export const findUserByEmailOrUsername = async (searchTerm: string): Promise<Roomer | null> => {
   const term = searchTerm.trim();
   const roomersRef = ref(db, 'roomers');
-  console.log(`[Search_Step] Initiating search for: "${term}"`);
+  console.log(`[Search] Triggered search for: "${term}"`);
 
-  const tryQuery = async (field: string, value: string) => {
-      console.log(`[Search_Step] Querying ${field} == "${value}"`);
+  const runQuery = async (field: string, value: string) => {
+      console.log(`[Search_Step] Checking ${field} == "${value}"`);
       const q = query(roomersRef, orderByChild(field), equalTo(value));
       const snap = await get(q);
       if (snap.exists()) {
           const val = snap.val();
           const uid = Object.keys(val)[0];
-          console.log(`[Search_Step] MATCH FOUND in ${field}! UID: ${uid}`);
+          console.log(`[Search_Step] Success! Match in ${field}. UID: ${uid}`);
           return { uid, data: val[uid] };
       }
       return null;
   };
 
   try {
-      // 1. Try Email
-      let result = await tryQuery('email', term);
+      // 1. Check Email
+      let res = await runQuery('email', term);
       
-      // 2. Try Username (Exact)
-      if (!result) {
-          let uTerm = term.startsWith('$') ? term : '$' + term;
-          result = await tryQuery('username', uTerm);
+      // 2. Check Username (normalized with $)
+      if (!res) {
+          const uName = term.startsWith('$') ? term : '$' + term;
+          res = await runQuery('username', uName);
       }
 
-      // 3. Try Username (Capitalized if needed)
-      if (!result && term.length > 0) {
-          const uTerm = '$' + term.charAt(0).toUpperCase() + term.slice(1);
-          if (uTerm !== term) result = await tryQuery('username', uTerm);
+      // 3. Check Username (Capitalized)
+      if (!res && term.length > 0) {
+          const capitalized = '$' + term.charAt(0).toUpperCase() + term.slice(1);
+          if (capitalized !== term) res = await runQuery('username', capitalized);
       }
 
-      // 4. Try Display Name (Exact)
-      if (!result) {
-          result = await tryQuery('displayName', term);
+      // 4. Check Display Name
+      if (!res) {
+          res = await runQuery('displayName', term);
       }
 
-      if (result) {
+      if (res) {
           return {
-              uid: result.uid,
-              displayName: result.data.displayName || 'Unknown',
-              photoURL: result.data.photoURL || null,
-              username: result.data.username || null,
-              email: result.data.email || null,
+              uid: res.uid,
+              displayName: res.data.displayName || 'Unknown',
+              photoURL: res.data.photoURL || null,
+              username: res.data.username || null,
+              email: res.data.email || null,
               status: 'accepted'
           };
       }
 
-      console.log("[Search_Step] No match found across all indices.");
+      console.log("[Search] No user found with provided credentials.");
       return null;
   } catch (e: any) {
-      console.error("[Search_Fatal] Database query failed:", e.message);
+      console.error("[Search_Fatal]", e.message);
       throw e;
   }
 };
 
 export const addRoomerToUser = async (currentUid: string, targetUid: string) => {
-  console.log(`[Add_Step] Linking ${currentUid} -> ${targetUid}`);
+  console.log(`[Add_Action] Adding ${targetUid} to ${currentUid}'s list`);
   try {
       const updates: any = {};
       updates[`roomers/${currentUid}/addedRoomers/${targetUid}`] = 'pending';
       updates[`roomers/${targetUid}/pendingApprovals/${currentUid}`] = true;
       await update(ref(db), updates);
-      console.log("[Add_Step] Database update successful.");
+      console.log("[Add_Action] Database update finished.");
   } catch (e: any) {
-      console.error("[Add_Step] FAILED:", e.message);
+      console.error("[Add_Action] FAILED:", e.message);
       throw e;
   }
 };
 
 export const approveRoomer = async (currentUid: string, targetUid: string) => {
-    console.log(`[Action] Approving ${targetUid}`);
+    console.log(`[Approval] Approving ${targetUid}`);
     try {
         const updates: any = {};
         updates[`roomers/${currentUid}/pendingApprovals/${targetUid}`] = null;
         updates[`roomers/${currentUid}/addedRoomers/${targetUid}`] = 'accepted';
         updates[`roomers/${targetUid}/addedRoomers/${currentUid}`] = 'accepted';
         await update(ref(db), updates);
-    } catch (e: any) {}
+        console.log("[Approval] SUCCESS");
+    } catch (e: any) {
+        console.error("[Approval] FAILED:", e.message);
+    }
 };
 
 export const deleteRoomer = async (currentUid: string, targetUid: string) => {
-    console.log(`[Action] Deleting relationship with ${targetUid}`);
+    console.log(`[Delete] Removing ${targetUid}`);
     try {
         const updates: any = {};
         updates[`roomers/${currentUid}/addedRoomers/${targetUid}`] = null;
@@ -194,7 +198,10 @@ export const deleteRoomer = async (currentUid: string, targetUid: string) => {
         updates[`roomers/${targetUid}/addedRoomers/${currentUid}`] = null;
         updates[`roomers/${targetUid}/pendingApprovals/${currentUid}`] = null;
         await update(ref(db), updates);
-    } catch (e: any) {}
+        console.log("[Delete] SUCCESS");
+    } catch (e: any) {
+        console.error("[Delete] FAILED:", e.message);
+    }
 };
 
 export const getRoomerDetails = async (uid: string, status: Roomer['status']): Promise<Roomer | null> => {

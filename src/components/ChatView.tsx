@@ -27,30 +27,56 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
     return () => clearTimeout(timer);
   }, []);
 
-  // Presence Logic: Instant updates
+  // INSTANT PRESENCE SCHEME
   useEffect(() => {
     if (!currentUser.uid) return;
 
     const userRef = ref(db, `roomers/${currentUser.uid}`);
-    const connectedRef = ref(db, '.info/connected');
     
-    const unsubscribe = onValue(connectedRef, (snap) => {
-        if (snap.val() === true) {
-            update(userRef, { activeRoom: roomId });
-            onDisconnect(userRef).update({ activeRoom: null });
+    const setStatus = (status: string | null) => {
+        console.log(`[Presence] Set activeRoom: ${status}`);
+        update(userRef, { activeRoom: status }).catch(() => {});
+    };
+
+    // 1. Initial Set
+    setStatus(roomId);
+
+    // 2. onDisconnect (for abrupt closures like crash/network loss)
+    const disconnectRef = onDisconnect(userRef);
+    disconnectRef.update({ activeRoom: null });
+
+    // 3. Visibility Change (Backgrounding the app/switching tabs)
+    const handleVisibility = () => {
+        if (document.visibilityState === 'hidden') {
+            console.log("[Presence] App backgrounded, clearing activeRoom.");
+            setStatus(null);
+        } else {
+            console.log("[Presence] App foregrounded, restoring activeRoom.");
+            setStatus(roomId);
         }
-    });
+    };
+
+    // 4. Before Unload (Closing the tab/browser)
+    const handleUnload = () => {
+        setStatus(null);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('beforeunload', handleUnload);
 
     return () => {
-      unsubscribe();
-      // ROBUST: Clear instantly on unmount
-      update(ref(db, `roomers/${currentUser.uid}`), { activeRoom: null });
+      console.log("[Presence] Unmounting ChatView, clearing activeRoom.");
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('beforeunload', handleUnload);
+      disconnectRef.cancel(); // Prevent double trigger
+      setStatus(null);
     };
   }, [roomId, currentUser.uid]);
 
   const handleBack = async () => {
+    console.log("[Action] Navigating back from chat.");
     setIsVisible(false);
-    // ROBUST: Clear instantly before navigation
+    // Explicit instant update before navigation
     await update(ref(db, `roomers/${currentUser.uid}`), { activeRoom: null });
     setTimeout(onBack, 300);
   };
@@ -101,7 +127,9 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
             const targetToken = val.fcmToken;
             const recipientActiveRoom = val.activeRoom;
 
+            // Only notify if recipient is NOT in the room
             if (targetToken && recipientActiveRoom !== roomId) {
+                 console.log(`[Notification] Recipient ${recipient.uid} not in room. Sending notification.`);
                  const mySnapshot = await get(child(ref(db), `roomers/${currentUser.uid}`));
                  const myData = mySnapshot.exists() ? mySnapshot.val() : {};
                  const rawUsername = myData.username || '';
@@ -122,6 +150,8 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
                      headers: { "Content-Type": "text/plain;charset=utf-8" },
                      body: JSON.stringify(payload)
                  });
+            } else {
+                 console.log("[Notification] Recipient is currently in the room. Skipping push notification.");
             }
         }
     } catch (e) {}

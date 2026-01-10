@@ -33,49 +33,49 @@ export default function RoomsList({ currentUser, roomers, loading, onNavigateCha
     const term = searchTerm.trim();
     if (!term || isProcessing) return;
 
-    console.log("[Add_Flow] Start processing for term:", term);
+    console.log(`[Add_Flow] Initiating search for credentials: "${term}"`);
     setSearchError('');
     setIsProcessing(true);
     
     try {
-      // Step 1: Search for the user
+      // Step 1: Sequential Search (Email -> Username -> DisplayName)
       const result = await findUserByEmailOrUsername(term);
       
       if (!result) {
-        console.warn("[Add_Flow] User not found.");
+        console.warn("[Add_Flow] Search returned null. User not found.");
         setSearchError("A roomer with these credentials doesn't exist. Try correct username, display name, or email.");
         setIsProcessing(false);
         return;
       }
 
-      // Step 2: Validate relationship
+      // Step 2: Safety Checks
       if (result.uid === currentUser.uid) {
-        console.warn("[Add_Flow] Self-add detected.");
+        console.warn("[Add_Flow] User attempted to add themselves.");
         setSearchError("You cannot add yourself.");
         setIsProcessing(false);
         return;
       }
 
-      const alreadyExists = roomers.find(r => r.uid === result.uid);
-      if (alreadyExists) {
-        console.warn("[Add_Flow] User already in list.");
-        setSearchError("User is already in your rooms.");
+      const alreadyInList = roomers.find(r => r.uid === result.uid);
+      if (alreadyInList) {
+        console.warn("[Add_Flow] Target user is already in the contact list.");
+        setSearchError("User is already in your rooms list.");
         setIsProcessing(false);
         return;
       }
 
-      // Step 3: Add the user
-      console.log("[Add_Flow] Match confirmed. Adding UID:", result.uid);
+      // Step 3: Database write
+      console.log(`[Add_Flow] Match confirmed: ${result.displayName} (${result.uid}). Recording request.`);
       await addRoomerToUser(currentUser.uid, result.uid);
       
-      // Step 4: Success, close modal
-      console.log("[Add_Flow] Success. Closing modal.");
+      // Step 4: UI Reset
+      console.log("[Add_Flow] Roomer added successfully.");
       setShowAddModal(false);
       setSearchTerm('');
       setSearchError('');
     } catch (err: any) {
-      console.error("[Add_Flow] Error occurred:", err.message);
-      setSearchError("An unexpected error occurred. Please try again.");
+      console.error("[Add_Flow] Fatal Error:", err.message);
+      setSearchError("Database error. Please check your connection.");
     } finally {
       setIsProcessing(false);
     }
@@ -148,33 +148,28 @@ export default function RoomsList({ currentUser, roomers, loading, onNavigateCha
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
           <div className="w-full max-w-sm bg-zinc-950 border border-zinc-800 rounded-3xl p-6 shadow-2xl ring-1 ring-white/5">
             <h2 className="text-xl font-bold text-white mb-2">Find Roomer</h2>
-            <p className="text-zinc-500 text-sm mb-6">Search by username, display name, or email address.</p>
+            <p className="text-zinc-500 text-sm mb-6">Search by username, display name, or email.</p>
             
             <form onSubmit={handleAddFlow} className="space-y-4">
                <div className="relative">
                  <input 
                    type="text" 
-                   placeholder="Enter details..." 
+                   placeholder="Details..." 
                    value={searchTerm} 
                    onChange={(e) => {
                        setSearchTerm(e.target.value);
                        if (searchError) setSearchError('');
                    }} 
-                   className="w-full bg-black border border-zinc-800 rounded-2xl px-5 py-4 text-white placeholder-zinc-700 focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500 transition-all outline-none" 
+                   className="w-full bg-black border border-zinc-800 rounded-2xl px-5 py-4 text-white placeholder-zinc-700 focus:border-zinc-500 transition-all outline-none" 
                    autoFocus 
                    autoComplete="off"
                    disabled={isProcessing}
                  />
-                 {isProcessing && (
-                     <div className="absolute right-4 top-1/2 -translate-y-1/2">
-                        <div className="w-5 h-5 border-2 border-zinc-800 border-t-white animate-spin rounded-full"></div>
-                     </div>
-                 )}
                </div>
                
                {searchError && (
-                 <div className="px-1 animate-in fade-in slide-in-from-top-1">
-                    <p className="text-red-400 text-xs leading-relaxed">{searchError}</p>
+                 <div className="px-1 py-1">
+                    <p className="text-red-400 text-[13px] leading-tight text-center">{searchError}</p>
                  </div>
                )}
                
@@ -192,7 +187,7 @@ export default function RoomsList({ currentUser, roomers, loading, onNavigateCha
                       disabled={!searchTerm.trim() || isProcessing} 
                       className={`flex-1 py-4 text-sm font-bold rounded-2xl active:scale-95 transition-all ${(!searchTerm.trim() || isProcessing) ? 'bg-zinc-900 text-zinc-800' : 'bg-white text-black'}`}
                   >
-                      {isProcessing ? 'Checking...' : 'Add'}
+                      {isProcessing ? 'Searching...' : 'Add'}
                   </button>
                </div>
             </form>
