@@ -17,7 +17,6 @@ export interface Message {
   timestamp: number;
 }
 
-// Roomer now includes status for the approval flow
 export interface Roomer {
   uid: string;
   displayName: string;

@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { auth, updateUserProfile, requestAndStoreToken, onMessageListener } from './services/firebase';
+import { auth, updateUserProfile, requestAndStoreToken, onMessageListener, db, getRoomerDetails } from './services/firebase';
 import { onAuthStateChanged, User, getRedirectResult, setPersistence, browserLocalPersistence } from 'firebase/auth';
+import { ref, onValue } from 'firebase/database';
 import Login from './components/Login';
 import ChatView from './components/ChatView';
 import RoomsList from './components/RoomsList';
@@ -10,8 +11,6 @@ import { UserProfile, AppView, Roomer } from './types';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
-  
-  // Persist the current view to LocalStorage so app state survives reloads/re-opens
   const [view, setView] = useState<AppView>(() => {
     try {
         const saved = localStorage.getItem('onyx_app_view');
@@ -21,31 +20,26 @@ export default function App() {
     }
   });
 
-  // Ref to track view inside event listeners without closure staleness
-  const viewRef = useRef<AppView>(view);
-
+  const [roomers, setRoomers] = useState<Roomer[]>([]);
+  const [loadingRoomers, setLoadingRoomers] = useState(true);
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [loadingAuth, setLoadingAuth] = useState(true);
+  const viewRef = useRef<AppView>(view);
 
   useEffect(() => {
     localStorage.setItem('onyx_app_view', JSON.stringify(view));
     viewRef.current = view;
   }, [view]);
 
-  // 1. Auth Init & Hydration
+  // Auth & Notifications Logic
   useEffect(() => {
     let unsubscribe: () => void;
-
     const initAuth = async () => {
         try {
-            console.log("STAGE 1: Init Auth - Setting Persistence");
             await setPersistence(auth, browserLocalPersistence);
-            
-            // Check Redirect Result (Standard check for returning from OAuth)
             try {
                 const result = await getRedirectResult(auth);
                 if (result?.user) {
-                    console.log("[Auth] Redirect Success:", result.user.email);
                     setUser(result.user);
                     updateUserProfile(result.user.uid, {
                         email: result.user.email,
@@ -53,40 +47,27 @@ export default function App() {
                         photoURL: result.user.photoURL,
                         lastOnline: Date.now()
                     });
-                    // Trigger token request on login
                     requestAndStoreToken(result.user.uid);
                 }
-            } catch (e: any) {
-                console.error("[Auth] Redirect Error:", e.code, e.message);
-            }
+            } catch (e) {}
 
-            // Attach Listener
             unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-                console.log("STAGE 3: Auth State Changed:", currentUser ? currentUser.email : "NULL");
                 if (currentUser) {
                     setUser(currentUser);
                     setLoadingAuth(false);
-                    // Trigger token request on session restore
                     requestAndStoreToken(currentUser.uid);
                 } else {
                     setUser(null);
                     setLoadingAuth(false);
                 }
             });
-
-        } catch (error: any) {
-            console.error("Auth Init Critical Error:", error.code, error.message);
+        } catch (error) {
             setLoadingAuth(false);
         }
     };
-
     initAuth();
     
-    // 2. Foreground Message Listener
-    // This catches messages when the app is OPEN.
     onMessageListener((payload) => {
-        console.log("Received foreground message:", payload);
-        
         let title = "New Message";
         let body = "You have a new message";
         let roomId = "";
@@ -95,43 +76,63 @@ export default function App() {
             title = payload.notification.title || title;
             body = payload.notification.body || body;
         }
-        
         if (payload.data) {
             if (payload.data.roomId) roomId = payload.data.roomId;
-            // Fallback for title/body if notification block missing
             if (!payload.notification) {
                 title = payload.data.title || title;
                 body = payload.data.body || body;
             }
         }
-
-        // INTELLIGENT NOTIFICATION:
-        // Only show if we are NOT in the specific chat room of the incoming message.
         const currentView = viewRef.current;
         const isChattingWithSender = currentView.name === 'CHAT' && currentView.roomId === roomId;
-
-        if (!isChattingWithSender) {
-             if (Notification.permission === 'granted') {
-                new Notification(title, {
-                    body: body,
-                    icon: '/icon-192.png'
-                });
-            }
+        if (!isChattingWithSender && Notification.permission === 'granted') {
+            new Notification(title, { body, icon: '/icon-192.png' });
         }
     });
 
-    return () => {
-        if (unsubscribe) unsubscribe();
-    };
+    return () => { if (unsubscribe) unsubscribe(); };
   }, []);
+
+  // Roomers Data Fetching (Cached at App level)
+  useEffect(() => {
+    if (!user) {
+        setRoomers([]);
+        setLoadingRoomers(false);
+        return;
+    }
+
+    const userRef = ref(db, `roomers/${user.uid}`);
+    const unsub = onValue(userRef, async (snapshot) => {
+      const data = snapshot.val();
+      const allRoomers: Roomer[] = [];
+      if (data) {
+        if (data.addedRoomers) {
+             const addedUids = Object.keys(data.addedRoomers);
+             const addedDetails = await Promise.all(addedUids.map(async (uid) => {
+                 const val = data.addedRoomers[uid];
+                 const status = val === 'accepted' ? 'accepted' : 'pending_outgoing';
+                 return getRoomerDetails(uid, status);
+             }));
+             allRoomers.push(...addedDetails.filter(r => r !== null) as Roomer[]);
+        }
+        if (data.pendingApprovals) {
+            const pendingUids = Object.keys(data.pendingApprovals);
+            const pendingDetails = await Promise.all(pendingUids.map(uid => getRoomerDetails(uid, 'pending_incoming')));
+            allRoomers.push(...pendingDetails.filter(r => r !== null) as Roomer[]);
+        }
+      }
+      const unique = Array.from(new Map(allRoomers.map(item => [item.uid, item])).values());
+      setRoomers(unique);
+      setLoadingRoomers(false);
+    });
+
+    return () => unsub();
+  }, [user]);
 
   const toggleTheme = () => {
       setIsDarkMode(!isDarkMode);
-      if (isDarkMode) {
-          document.documentElement.classList.remove('dark');
-      } else {
-          document.documentElement.classList.add('dark');
-      }
+      if (isDarkMode) document.documentElement.classList.remove('dark');
+      else document.documentElement.classList.add('dark');
   };
 
   const userProfile: UserProfile | null = user ? {
@@ -148,14 +149,6 @@ export default function App() {
     setView({ name: 'CHAT', roomId, recipient: roomer });
   };
 
-  const handleNavigateProfile = () => {
-    setView({ name: 'PROFILE' });
-  };
-
-  const handleBackToRooms = () => {
-    setView({ name: 'ROOMS_LIST' });
-  };
-
   if (loadingAuth) {
       return (
         <div className="h-[100dvh] w-screen bg-black flex flex-col items-center justify-center gap-4">
@@ -166,36 +159,32 @@ export default function App() {
   }
 
   return (
-    // Rely on 100dvh and the updated meta tag for layout stability
     <div className={`w-screen h-[100dvh] relative flex flex-col overflow-hidden ${isDarkMode ? 'bg-black text-white' : 'bg-gray-100 text-black'}`}>
       <DebugConsole />
-      
       <div className="flex-1 w-full h-full relative z-10 flex flex-col">
-        {!userProfile ? (
-          <Login />
-        ) : (
+        {!userProfile ? ( <Login /> ) : (
           <>
             {view.name === 'ROOMS_LIST' && (
               <RoomsList 
                 currentUser={userProfile} 
+                roomers={roomers}
+                loading={loadingRoomers}
                 onNavigateChat={handleNavigateChat}
-                onNavigateProfile={handleNavigateProfile}
+                onNavigateProfile={() => setView({ name: 'PROFILE' })}
               />
             )}
-
             {view.name === 'CHAT' && (
               <ChatView 
                 roomId={view.roomId} 
                 recipient={view.recipient}
                 currentUser={userProfile} 
-                onBack={handleBackToRooms} 
+                onBack={() => setView({ name: 'ROOMS_LIST' })} 
               />
             )}
-
             {view.name === 'PROFILE' && (
               <ProfileView 
                 currentUser={userProfile}
-                onBack={handleBackToRooms}
+                onBack={() => setView({ name: 'ROOMS_LIST' })}
                 toggleTheme={toggleTheme}
                 isDarkMode={isDarkMode}
               />

@@ -1,3 +1,4 @@
+
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { 
   getAuth, 
@@ -20,13 +21,10 @@ import {
 import { getMessaging, isSupported, getToken, onMessage, MessagePayload } from "firebase/messaging";
 import { UserProfile, Roomer } from "../types";
 
-// --- CONFIGURATION ---
-// PASTE YOUR VAPID KEY HERE (From Project Settings > Cloud Messaging > Web Push certs)
 export const VAPID_KEY = "YOUR_VAPID_KEY_HERE"; 
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  // Proxy through Vercel to avoid 3rd party cookie blocking on iOS PWA
   authDomain: typeof window !== 'undefined' ? window.location.hostname : "afterchat.firebaseapp.com",
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
@@ -35,96 +33,67 @@ const firebaseConfig = {
   databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL
 };
 
-// Singleton init
 export const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
 export const db = getDatabase(app);
 export const googleProvider = new GoogleAuthProvider();
 
-// PWA Config
-googleProvider.setCustomParameters({
-  prompt: 'select_account'
-});
+// Helper to sign in with email/password
+export const signInWithEmail = (email: string, pass: string) => signInWithEmailAndPassword(auth, email, pass);
+
+// Helper to create account with email/password
+export const signUpWithEmail = (email: string, pass: string) => createUserWithEmailAndPassword(auth, email, pass);
 
 export const messaging = async () => {
   try {
     const supported = await isSupported();
     return supported ? getMessaging(app) : null;
   } catch (err) {
-    console.warn("Firebase Messaging not supported.", err);
     return null;
   }
 };
 
-// --- Notifications ---
-
 export const requestAndStoreToken = async (uid: string) => {
   try {
-    // SAFETY CHECK: Ensure we are in a browser environment that supports Notifications
-    if (typeof window === 'undefined' || !('Notification' in window)) {
-        console.log("Notifications not supported in this environment.");
-        return;
-    }
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
 
     const msg = await messaging();
-    if (!msg) {
-        console.log("Messaging not supported.");
+    if (!msg) return;
+
+    // Check existing permission to avoid false-negative logs on startup
+    if (Notification.permission === 'denied') {
+        console.log("[FCM] Permission was previously denied by user.");
         return;
     }
 
     const permission = await Notification.requestPermission();
     if (permission === 'granted') {
-        // We use the exported constant or env var fallback
-        const currentVapidKey = VAPID_KEY !== "YOUR_VAPID_KEY_HERE" 
-            ? VAPID_KEY 
-            : import.meta.env.VITE_FIREBASE_VAPID_KEY;
-
-        if (!currentVapidKey) {
-            console.warn("VAPID KEY is missing. Notifications will not work.");
-            // We continue without VAPID, sometimes works if config is perfect, but unreliable.
-        }
-
-        const token = await getToken(msg, {
-            vapidKey: currentVapidKey
-        });
+        const currentVapidKey = VAPID_KEY !== "YOUR_VAPID_KEY_HERE" ? VAPID_KEY : import.meta.env.VITE_FIREBASE_VAPID_KEY;
+        const token = await getToken(msg, { vapidKey: currentVapidKey });
 
         if (token) {
             console.log("FCM Token Generated:", token);
-            await update(ref(db, `users/${uid}`), { fcmToken: token });
-        } else {
-            console.log("No registration token available. Request permission to generate one.");
+            await update(ref(db, `roomers/${uid}`), { fcmToken: token });
         }
-    } else {
-        console.log("Notification permission denied.");
     }
   } catch (e) {
-      console.error("Notification permission/token error", e);
+      // Silence noisy errors during startup persistence checks
   }
 };
 
-export const setupNotifications = requestAndStoreToken;
+// Exported alias for setupNotifications used in RoomsList component
+export const setupNotifications = (uid: string) => requestAndStoreToken(uid);
 
-// FOREGROUND LISTENER
 export const onMessageListener = async (callback: (payload: MessagePayload) => void) => {
   const msg = await messaging();
   if (msg) {
-    onMessage(msg, (payload) => {
-      console.log("[Firebase] Foreground Message Received:", payload);
-      callback(payload);
-    });
+    onMessage(msg, (payload) => callback(payload));
   }
 };
 
-// --- Auth Helpers ---
-
-export const signInWithEmail = (email: string, pass: string) => signInWithEmailAndPassword(auth, email, pass);
-export const signUpWithEmail = (email: string, pass: string) => createUserWithEmailAndPassword(auth, email, pass);
-
-// --- User Management ---
-
 export const updateUserProfile = async (uid: string, data: Partial<UserProfile>) => {
   try {
-    const userRef = ref(db, `users/${uid}`);
+    const userRef = ref(db, `roomers/${uid}`);
     await update(userRef, data);
   } catch (e) {
     console.error("Failed to update user profile", e);
@@ -134,42 +103,34 @@ export const updateUserProfile = async (uid: string, data: Partial<UserProfile>)
 
 export const getUserProfile = async (uid: string): Promise<UserProfile | null> => {
   try {
-    const snapshot = await get(child(ref(db), `users/${uid}`));
+    const snapshot = await get(child(ref(db), `roomers/${uid}`));
     if (snapshot.exists()) {
       return snapshot.val() as UserProfile;
     }
     return null;
   } catch (e) {
-    console.error("Failed to fetch user profile", e);
     return null;
   }
 };
 
-// SEARCH LOGIC (Case-insensitive approximation)
 export const findUserByEmailOrUsername = async (searchTerm: string): Promise<Roomer | null> => {
-  const usersRef = ref(db, 'users');
+  const roomersRef = ref(db, 'roomers');
   let cleanTerm = searchTerm.trim();
   
-  // 1. Try Email (Exact)
-  let q = query(usersRef, orderByChild('email'), equalTo(cleanTerm));
+  let q = query(roomersRef, orderByChild('email'), equalTo(cleanTerm));
   let snapshot = await get(q);
   
-  // 2. Try Username (Exact)
   if (!snapshot.exists()) {
-     // Ensure $ prefix if not present for username search
     if (!cleanTerm.includes('@') && !cleanTerm.startsWith('$')) {
         cleanTerm = '$' + cleanTerm;
     }
-
-    // Try exact match first
-    q = query(usersRef, orderByChild('username'), equalTo(cleanTerm));
+    q = query(roomersRef, orderByChild('username'), equalTo(cleanTerm));
     snapshot = await get(q);
     
-    // 3. Forgiving Search (Try to match lowercase/capitalization variations if simple match fails)
     if (!snapshot.exists() && cleanTerm.startsWith('$')) {
         const namePart = cleanTerm.substring(1);
         const capitalized = '$' + namePart.charAt(0).toUpperCase() + namePart.slice(1);
-        q = query(usersRef, orderByChild('username'), equalTo(capitalized));
+        q = query(roomersRef, orderByChild('username'), equalTo(capitalized));
         snapshot = await get(q);
     }
   }
@@ -189,56 +150,43 @@ export const findUserByEmailOrUsername = async (searchTerm: string): Promise<Roo
   return null;
 };
 
-// --- ROOMER APPROVAL FLOW ---
-
-// 1. ADD: User A adds User B
 export const addRoomerToUser = async (currentUid: string, targetUid: string) => {
-  // Update 1: My List
-  await update(ref(db, `users/${currentUid}/addedUsers`), {
+  await update(ref(db, `roomers/${currentUid}/addedRoomers`), {
     [targetUid]: 'pending'
   });
-
-  // Update 2: Their List
-  await update(ref(db, `users/${targetUid}/pendingApprovals`), {
+  await update(ref(db, `roomers/${targetUid}/pendingApprovals`), {
     [currentUid]: true
   });
 };
 
-// 2. APPROVE: User B accepts User A
 export const approveRoomer = async (currentUid: string, targetUid: string) => {
-    // 1. Update Me
     const myUpdates = {
         [`pendingApprovals/${targetUid}`]: null,
-        [`addedUsers/${targetUid}`]: 'accepted'
+        [`addedRoomers/${targetUid}`]: 'accepted'
     };
-    await update(ref(db, `users/${currentUid}`), myUpdates);
-    
-    // 2. Update Them
-    await update(ref(db, `users/${targetUid}/addedUsers`), {
+    await update(ref(db, `roomers/${currentUid}`), myUpdates);
+    await update(ref(db, `roomers/${targetUid}/addedRoomers`), {
         [currentUid]: 'accepted'
     });
 };
 
-// 3. REJECT / DELETE: User B rejects A, OR User A deletes B
 export const deleteRoomer = async (currentUid: string, targetUid: string) => {
-    // 1. Update Me
     const myUpdates = {
-        [`addedUsers/${targetUid}`]: null,
+        [`addedRoomers/${targetUid}`]: null,
         [`pendingApprovals/${targetUid}`]: null
     };
-    await update(ref(db, `users/${currentUid}`), myUpdates);
+    await update(ref(db, `roomers/${currentUid}`), myUpdates);
 
-    // 2. Update Them
     const theirUpdates = {
-        [`addedUsers/${currentUid}`]: null,
+        [`addedRoomers/${currentUid}`]: null,
         [`pendingApprovals/${currentUid}`]: null
     };
-    await update(ref(db, `users/${targetUid}`), theirUpdates);
+    await update(ref(db, `roomers/${targetUid}/addedRoomers`), { [currentUid]: null });
+    await update(ref(db, `roomers/${targetUid}/pendingApprovals`), { [currentUid]: null });
 };
 
-// Helper to fetch details
 export const getRoomerDetails = async (uid: string, status: Roomer['status']): Promise<Roomer | null> => {
-  const snapshot = await get(child(ref(db), `users/${uid}`));
+  const snapshot = await get(child(ref(db), `roomers/${uid}`));
   if (snapshot.exists()) {
     const val = snapshot.val();
     return {
