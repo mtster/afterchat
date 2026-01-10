@@ -31,23 +31,23 @@ export default function App() {
     viewRef.current = view;
   }, [view]);
 
-  // Auth & Notifications Logic
+  // Central Auth & Profile Sync Logic
   useEffect(() => {
     let unsubscribe: () => void;
     const initAuth = async () => {
         try {
             await setPersistence(auth, browserLocalPersistence);
+            
+            // Handle Redirect Result (Google Auth)
             try {
                 const result = await getRedirectResult(auth);
                 if (result?.user) {
-                    setUser(result.user);
-                    updateUserProfile(result.user.uid, {
+                    await updateUserProfile(result.user.uid, {
                         email: result.user.email,
                         displayName: result.user.displayName,
                         photoURL: result.user.photoURL,
                         lastOnline: Date.now()
                     });
-                    requestAndStoreToken(result.user.uid);
                 }
             } catch (e) {}
 
@@ -55,6 +55,15 @@ export default function App() {
                 if (currentUser) {
                     setUser(currentUser);
                     setLoadingAuth(false);
+                    
+                    // Force Sync Profile on every auth state change
+                    updateUserProfile(currentUser.uid, {
+                        email: currentUser.email,
+                        displayName: currentUser.displayName || currentUser.email?.split('@')[0] || 'User',
+                        photoURL: currentUser.photoURL,
+                        lastOnline: Date.now()
+                    }).catch(() => {});
+                    
                     requestAndStoreToken(currentUser.uid);
                 } else {
                     setUser(null);
@@ -68,24 +77,13 @@ export default function App() {
     initAuth();
     
     onMessageListener((payload) => {
-        let title = "New Message";
-        let body = "You have a new message";
-        let roomId = "";
-
-        if (payload.notification) {
-            title = payload.notification.title || title;
-            body = payload.notification.body || body;
-        }
-        if (payload.data) {
-            if (payload.data.roomId) roomId = payload.data.roomId;
-            if (!payload.notification) {
-                title = payload.data.title || title;
-                body = payload.data.body || body;
-            }
-        }
         const currentView = viewRef.current;
+        const roomId = payload.data?.roomId || "";
         const isChattingWithSender = currentView.name === 'CHAT' && currentView.roomId === roomId;
+        
         if (!isChattingWithSender && Notification.permission === 'granted') {
+            const title = payload.notification?.title || payload.data?.title || "New Message";
+            const body = payload.notification?.body || payload.data?.body || "";
             new Notification(title, { body, icon: '/icon-192.png' });
         }
     });
@@ -93,7 +91,7 @@ export default function App() {
     return () => { if (unsubscribe) unsubscribe(); };
   }, []);
 
-  // Roomers Data Fetching (Cached at App level)
+  // Roomers Data Fetching
   useEffect(() => {
     if (!user) {
         setRoomers([]);
@@ -109,8 +107,8 @@ export default function App() {
         if (data.addedRoomers) {
              const addedUids = Object.keys(data.addedRoomers);
              const addedDetails = await Promise.all(addedUids.map(async (uid) => {
-                 const val = data.addedRoomers[uid];
-                 const status = val === 'accepted' ? 'accepted' : 'pending_outgoing';
+                 const statusVal = data.addedRoomers[uid];
+                 const status = statusVal === 'accepted' ? 'accepted' : 'pending_outgoing';
                  return getRoomerDetails(uid, status);
              }));
              allRoomers.push(...addedDetails.filter(r => r !== null) as Roomer[]);

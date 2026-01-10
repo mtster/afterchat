@@ -9,23 +9,17 @@ const Login: React.FC = () => {
   const [loading, setLoading] = useState(false);
   
   const handleGoogleLogin = async () => {
-    console.log("[Login_Start] Google OAuth Method");
     try {
       const isIOSStandalone = (window.navigator as any).standalone === true;
       const isStandalone = window.matchMedia('(display-mode: standalone)').matches || isIOSStandalone;
-      
       await setPersistence(auth, browserLocalPersistence);
 
       if (isStandalone) {
-        console.log("[Login_Mode] Redirect mode for Standalone/iOS PWA");
         await signInWithRedirect(auth, googleProvider);
       } else {
-        console.log("[Login_Mode] Popup mode for standard browser");
         const result = await signInWithPopup(auth, googleProvider);
         const user = result.user;
-        
         if (user) {
-          console.log("[Login_Success] User authenticated:", user.email);
           await updateUserProfile(user.uid, {
             email: user.email,
             displayName: user.displayName,
@@ -35,7 +29,6 @@ const Login: React.FC = () => {
         }
       }
     } catch (error: any) {
-      console.error("[Login_Error] Google Auth Failure:", error.code, error.message);
       alert(error.message);
     }
   };
@@ -44,7 +37,6 @@ const Login: React.FC = () => {
     e.preventDefault();
     if (!email || !password) return;
     
-    console.log(`[Login_Start] Email Method: ${isSignUp ? 'SignUp' : 'SignIn'}`);
     setLoading(true);
     try {
       await setPersistence(auth, browserLocalPersistence);
@@ -58,28 +50,18 @@ const Login: React.FC = () => {
       
       const user = userCred.user;
       if (user) {
-        console.log("[Login_Success] Auth success for:", user.email);
-        // We delay profile creation slightly if it's a new user to allow SDK to propagate session
-        if (isSignUp) {
-            console.log("[Profile_Init] New account - creating roomer record...");
-            await new Promise(r => setTimeout(r, 500));
-        }
-
+        // New account profile creation
         await updateUserProfile(user.uid, {
           email: user.email,
           displayName: user.displayName || email.split('@')[0],
           photoURL: user.photoURL,
           lastOnline: Date.now()
         });
-        console.log("[Profile_Init] DB entry confirmed.");
       }
     } catch (error: any) {
-      console.error("[Login_Error] Email Failure:", error.code, error.message);
       let msg = error.message;
       if (error.code === 'auth/invalid-credential') msg = "Invalid email or password.";
-      if (error.code === 'auth/email-already-in-use') msg = "Email already in use.";
-      if (error.code === 'auth/weak-password') msg = "Password should be at least 6 characters.";
-      if (error.code === 'PERMISSION_DENIED') msg = "Database access denied. Check security rules.";
+      if (error.code === 'PERMISSION_DENIED') msg = "Access Denied. Ensure Firebase Rules are updated for 'roomers' node.";
       alert(msg);
     }
     setLoading(false);
