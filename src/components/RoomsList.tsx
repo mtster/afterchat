@@ -23,9 +23,13 @@ export default function RoomsList({ currentUser, roomers, loading, onNavigateCha
 
   // Sync Bell Icon with Database in real-time
   useEffect(() => {
-    const tokenRef = ref(db, `roomers/${currentUser.uid}/fcmToken`);
+    console.log("[Bell_Sync] Setting up listener for UID:", currentUser.uid);
+    const tokenPath = `roomers/${currentUser.uid}/fcmToken`;
+    const tokenRef = ref(db, tokenPath);
     const unsub = onValue(tokenRef, (snap) => {
-      setHasFcmToken(!!snap.val());
+      const val = snap.val();
+      console.log(`[Bell_Sync] Data received from "${tokenPath}":`, val ? "TOKEN_EXISTS" : "NO_TOKEN");
+      setHasFcmToken(!!val);
     });
     return () => unsub();
   }, [currentUser.uid]);
@@ -37,43 +41,58 @@ export default function RoomsList({ currentUser, roomers, loading, onNavigateCha
     let term = searchTerm.trim();
     if (!term) return;
 
+    console.log("[Search_Flow] Starting search for:", term);
+    setIsProcessing(true);
     try {
       const result = await findUserByEmailOrUsername(term);
       if (result) {
+        console.log("[Search_Flow] Result returned:", result.uid);
         if (result.uid === currentUser.uid) {
             setSearchError("You cannot add yourself.");
+            console.log("[Search_Flow] Denied: Self-add");
         } else {
             const exists = roomers.find(r => r.uid === result.uid);
             if (exists) {
                 setSearchError("User already in your rooms.");
+                console.log("[Search_Flow] Denied: Already added");
             } else {
                 setSearchResult(result);
-                console.log("[Search] Result found:", result.displayName);
+                console.log("[Search_Flow] Valid result set to state.");
             }
         }
       } else {
         setSearchError('User not found.');
+        console.log("[Search_Flow] No user found for term.");
       }
     } catch (err: any) {
       setSearchError("Search failed.");
+      console.error("[Search_Flow] Catch block:", err.message);
     }
+    setIsProcessing(false);
   };
 
   const handleAddUser = async () => {
-    if (!searchResult) return;
+    if (!searchResult) {
+        console.warn("[Add_Flow] Attempted to add but searchResult is null.");
+        return;
+    }
+    console.log("[Add_Flow] User confirmed. Triggering DB updates for:", searchResult.uid);
     setIsProcessing(true);
     try {
       await addRoomerToUser(currentUser.uid, searchResult.uid);
+      console.log("[Add_Flow] Successfully requested.");
       setShowAddModal(false);
       setSearchTerm('');
       setSearchResult(null);
     } catch (err: any) {
-      alert("Could not add user.");
+      console.error("[Add_Flow] Failed:", err.message);
+      alert("Could not add user. " + err.message);
     }
     setIsProcessing(false);
   };
 
   const handleNotificationClick = async () => {
+      console.log("[Bell_Click] Initiating notification setup...");
       await setupNotifications(currentUser.uid);
   };
 
@@ -82,7 +101,11 @@ export default function RoomsList({ currentUser, roomers, loading, onNavigateCha
       <div className="flex-none px-4 pb-3 flex items-center justify-between bg-zinc-900/50 backdrop-blur-md border-b border-zinc-800 sticky top-0 z-10" style={{ paddingTop: 'max(16px, env(safe-area-inset-top))' }}>
         <h1 className="text-2xl font-bold text-white tracking-tight">Rooms</h1>
         <div className="flex items-center gap-3">
-          <button onClick={handleNotificationClick} className={`w-8 h-8 flex items-center justify-center rounded-full bg-zinc-800 hover:bg-zinc-700 active:scale-95 transition-all ${hasFcmToken ? 'text-green-500' : 'text-zinc-500'}`}>
+          <button 
+            onClick={handleNotificationClick} 
+            className={`w-8 h-8 flex items-center justify-center rounded-full bg-zinc-800 hover:bg-zinc-700 active:scale-95 transition-all ${hasFcmToken ? 'text-green-500' : 'text-zinc-500'}`}
+            title={hasFcmToken ? "Notifications Active" : "Click to Enable Notifications"}
+          >
             <Bell size={18} />
           </button>
           <button onClick={() => setShowAddModal(true)} className="w-8 h-8 flex items-center justify-center rounded-full bg-zinc-800 hover:bg-zinc-700 active:scale-95 transition-all text-zinc-300">
@@ -140,11 +163,25 @@ export default function RoomsList({ currentUser, roomers, loading, onNavigateCha
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
           <div className="w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-2xl p-6 shadow-2xl">
-            <h2 className="text-lg font-semibold text-white mb-4">Add Roomer</h2>
+            <div className="flex justify-between items-center mb-4">
+                <h2 className="text-lg font-semibold text-white">Add Roomer</h2>
+                {isProcessing && <div className="w-4 h-4 border-2 border-zinc-500 border-t-white animate-spin rounded-full"></div>}
+            </div>
             <form onSubmit={handleSearch} className="mb-4">
-               <input type="text" placeholder="Email or Username" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full bg-black border border-zinc-700 rounded-xl px-4 py-3 text-white placeholder-zinc-600 focus:border-white transition-colors" autoFocus />
+               <input 
+                 type="text" 
+                 placeholder="Email or Username" 
+                 value={searchTerm} 
+                 onChange={(e) => setSearchTerm(e.target.value)} 
+                 className="w-full bg-black border border-zinc-700 rounded-xl px-4 py-3 text-white placeholder-zinc-600 focus:border-white transition-colors" 
+                 autoFocus 
+                 autoComplete="off"
+               />
+               <button type="submit" className="hidden">Search</button>
             </form>
+            
             {searchError && <p className="text-red-400 text-sm mb-4 text-center">{searchError}</p>}
+            
             {searchResult && (
               <div className="bg-black/50 rounded-xl p-3 flex items-center gap-3 mb-4 border border-zinc-800">
                 <div className="w-10 h-10 rounded-full bg-zinc-800 overflow-hidden shrink-0">
@@ -156,9 +193,21 @@ export default function RoomsList({ currentUser, roomers, loading, onNavigateCha
                 </div>
               </div>
             )}
+            
             <div className="flex gap-3">
-                <button onClick={() => {setShowAddModal(false); setSearchTerm(''); setSearchResult(null);}} className="flex-1 py-3 text-sm font-medium text-zinc-400 bg-zinc-800 rounded-xl">Cancel</button>
-                <button onClick={handleAddUser} disabled={!searchResult || isProcessing} className="flex-1 py-3 text-sm font-medium text-black bg-white rounded-xl disabled:opacity-30">Add</button>
+                <button 
+                  onClick={() => {setShowAddModal(false); setSearchTerm(''); setSearchResult(null); setSearchError('');}} 
+                  className="flex-1 py-3 text-sm font-medium text-zinc-400 bg-zinc-800 rounded-xl active:scale-95 transition-transform"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleAddUser} 
+                  disabled={!searchResult || isProcessing} 
+                  className={`flex-1 py-3 text-sm font-medium rounded-xl active:scale-95 transition-transform ${(!searchResult || isProcessing) ? 'bg-zinc-800 text-zinc-600 opacity-50' : 'bg-white text-black'}`}
+                >
+                  Add
+                </button>
             </div>
           </div>
         </div>
