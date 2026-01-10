@@ -50,20 +50,44 @@ export const messaging = async () => {
 };
 
 export const requestAndStoreToken = async (uid: string) => {
+  console.log(`[FCM] Initializing token sync for: ${uid}`);
   try {
-    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+        console.warn("[FCM] Notifications not supported in this browser.");
+        return;
+    }
     const msg = await messaging();
-    if (!msg) return;
+    if (!msg) {
+        console.warn("[FCM] Messaging is not supported or failed to initialize.");
+        return;
+    }
 
-    if (Notification.permission === 'granted') {
+    let permission = Notification.permission;
+    console.log(`[FCM] Current status: ${permission}`);
+
+    if (permission === 'default') {
+        console.log("[FCM] Prompting user for permission...");
+        permission = await Notification.requestPermission();
+        console.log(`[FCM] User response: ${permission}`);
+    }
+
+    if (permission === 'granted') {
         const currentVapidKey = VAPID_KEY !== "YOUR_VAPID_KEY_HERE" ? VAPID_KEY : import.meta.env.VITE_FIREBASE_VAPID_KEY;
+        console.log(`[FCM] Fetching token with VAPID key...`);
+        
         const token = await getToken(msg, { vapidKey: currentVapidKey });
         if (token) {
+            console.log(`[FCM] Token generated: ${token.substring(0, 15)}...`);
             await update(ref(db, `roomers/${uid}`), { fcmToken: token });
+            console.log("[FCM] SUCCESS: Token stored in database.");
+        } else {
+            console.warn("[FCM] Token generation returned null.");
         }
+    } else {
+        console.warn(`[FCM] Cannot fetch token: Permission is ${permission}`);
     }
   } catch (e: any) {
-      console.error("[FCM_Error]", e.message);
+      console.error("[FCM_Fatal]", e.message);
   }
 };
 
@@ -71,7 +95,10 @@ export const setupNotifications = (uid: string) => requestAndStoreToken(uid);
 
 export const onMessageListener = async (callback: (payload: MessagePayload) => void) => {
   const msg = await messaging();
-  if (msg) onMessage(msg, (payload) => callback(payload));
+  if (msg) onMessage(msg, (payload) => {
+    console.log("[FCM] Foreground message received:", payload);
+    callback(payload);
+  });
 };
 
 export const updateUserProfile = async (uid: string, data: Partial<UserProfile>, retryCount = 0) => {
