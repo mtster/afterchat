@@ -69,9 +69,11 @@ const Login: React.FC = () => {
 
   return (
     <div className="flex flex-col items-center justify-center h-full w-full bg-background p-6">
-      <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-zinc-800 to-zinc-600 mb-8 animate-pulse shadow-lg shadow-zinc-900/50" />
-      <h1 className="text-3xl font-light tracking-tight text-white mb-2">Onyx</h1>
-      <p className="text-muted text-sm mb-8">Pure, dark, seamless communication.</p>
+      <div className="w-24 h-24 rounded-full bg-zinc-900 mb-8 overflow-hidden border border-zinc-800 shadow-2xl shadow-white/5">
+        <img src="/icon-512.png" alt="Rooms Icon" className="w-full h-full object-cover" />
+      </div>
+      <h1 className="text-4xl font-bold tracking-tight text-white mb-2">Rooms</h1>
+      <p className="text-muted text-sm mb-8">Advanced, dark, seamless communication.</p>
       
       <form onSubmit={handleEmailAuth} className="w-full max-w-xs flex flex-col gap-3 mb-6">
         <input 
@@ -79,7 +81,7 @@ const Login: React.FC = () => {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="Email"
-          className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-white placeholder-zinc-600 focus:border-zinc-600 focus:outline-none transition-colors"
+          className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-white placeholder-zinc-600 focus:border-zinc-500 focus:outline-none transition-colors"
           required
         />
         <input 
@@ -87,13 +89,13 @@ const Login: React.FC = () => {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           placeholder="Password"
-          className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-white placeholder-zinc-600 focus:border-zinc-600 focus:outline-none transition-colors"
+          className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-white placeholder-zinc-600 focus:border-zinc-500 focus:outline-none transition-colors"
           required
         />
         <button 
           type="submit"
           disabled={loading}
-          className="w-full bg-white text-black font-medium h-12 rounded-xl active:scale-95 transition-transform duration-200 flex items-center justify-center mt-2 disabled:opacity-70"
+          className="w-full bg-white text-black font-bold h-12 rounded-xl active:scale-95 transition-transform duration-200 flex items-center justify-center mt-2 disabled:opacity-70"
         >
           {loading ? 'Processing...' : (isSignUp ? 'Create Account' : 'Sign In')}
         </button>
