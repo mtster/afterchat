@@ -6,7 +6,7 @@ export default function DebugConsole() {
 
   useEffect(() => {
     // 1. Recover logs
-    const saved = localStorage.getItem('onyx_debug_logs');
+    const saved = localStorage.getItem('rooms_debug_logs');
     if (saved) {
       try {
         setLogs(JSON.parse(saved));
@@ -27,7 +27,7 @@ export default function DebugConsole() {
       const logLine = `[LOG] ${new Date().toLocaleTimeString().split(' ')[0]}: ${msg}`;
       setLogs(prev => {
         const next = [...prev, logLine].slice(-100);
-        localStorage.setItem('onyx_debug_logs', JSON.stringify(next));
+        localStorage.setItem('rooms_debug_logs', JSON.stringify(next));
         return next;
       });
     };
@@ -44,7 +44,7 @@ export default function DebugConsole() {
       const logLine = `[ERR] ${new Date().toLocaleTimeString().split(' ')[0]}: ${msg}`;
       setLogs(prev => {
         const next = [...prev, logLine].slice(-100);
-        localStorage.setItem('onyx_debug_logs', JSON.stringify(next));
+        localStorage.setItem('rooms_debug_logs', JSON.stringify(next));
         return next;
       });
     };
@@ -58,7 +58,7 @@ export default function DebugConsole() {
   };
 
   const handleClear = () => {
-    localStorage.removeItem('onyx_debug_logs');
+    localStorage.removeItem('rooms_debug_logs');
     setLogs([]);
   };
 

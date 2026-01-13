@@ -9,11 +9,14 @@ import ProfileView from './components/ProfileView';
 import DebugConsole from './components/DebugConsole';
 import { UserProfile, AppView, Roomer } from './types'; 
 
+// Detect if we are running in the production environment
+const isProduction = typeof window !== 'undefined' && window.location.hostname === 'afterchat.vercel.app';
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [view, setView] = useState<AppView>(() => {
     try {
-        const saved = localStorage.getItem('onyx_app_view');
+        const saved = localStorage.getItem('rooms_app_view');
         return saved ? JSON.parse(saved) : { name: 'ROOMS_LIST' };
     } catch (e) {
         return { name: 'ROOMS_LIST' };
@@ -27,7 +30,7 @@ export default function App() {
   const viewRef = useRef<AppView>(view);
 
   useEffect(() => {
-    localStorage.setItem('onyx_app_view', JSON.stringify(view));
+    localStorage.setItem('rooms_app_view', JSON.stringify(view));
     viewRef.current = view;
   }, [view]);
 
@@ -151,14 +154,16 @@ export default function App() {
       return (
         <div className="h-[100dvh] w-screen bg-black flex flex-col items-center justify-center gap-4">
             <div className="w-12 h-12 rounded-full border-2 border-zinc-800 border-t-white animate-spin" />
-            <p className="text-zinc-500 text-xs font-mono">AUTHENTICATING...</p>
+            <p className="text-zinc-500 text-xs font-mono uppercase tracking-widest">Rooms Authenticating...</p>
         </div>
       );
   }
 
   return (
     <div className={`w-screen h-[100dvh] relative flex flex-col overflow-hidden ${isDarkMode ? 'bg-black text-white' : 'bg-gray-100 text-black'}`}>
-      <DebugConsole />
+      {/* Conditionally render DebugConsole only if NOT in production */}
+      {!isProduction && <DebugConsole />}
+      
       <div className="flex-1 w-full h-full relative z-10 flex flex-col">
         {!userProfile ? ( <Login /> ) : (
           <>
