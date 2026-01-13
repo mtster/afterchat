@@ -9,12 +9,15 @@ import ProfileView from './components/ProfileView';
 import DebugConsole from './components/DebugConsole';
 import { UserProfile, AppView, Roomer } from './types'; 
 
-// Production URL Constant
+// Environment Detection Logic
+// Production: 'afterchat.vercel.app' -> Debug Console HIDDEN
+// Development: 'afterchat-dev.vercel.app', 'localhost', etc. -> Debug Console VISIBLE
 const LIVE_PRODUCTION_URL = 'afterchat.vercel.app';
 const isLiveSite = typeof window !== 'undefined' && window.location.hostname === LIVE_PRODUCTION_URL;
 
 if (typeof window !== 'undefined') {
   console.log('Current Hostname:', window.location.hostname);
+  console.log('Environment Mode:', isLiveSite ? 'PRODUCTION (Debug Hidden)' : 'DEVELOPMENT (Debug Active)');
 }
 
 export default function App() {
@@ -166,7 +169,11 @@ export default function App() {
 
   return (
     <div className={`w-screen h-[100dvh] relative flex flex-col overflow-hidden ${isDarkMode ? 'bg-black text-white' : 'bg-gray-100 text-black'}`}>
-      {/* Conditionally render DebugConsole only if NOT on the live production site */}
+      {/* 
+          CONDITIONAL RENDER: 
+          If isLiveSite is TRUE (afterchat.vercel.app), DebugConsole is removed.
+          If isLiveSite is FALSE (afterchat-dev.vercel.app or localhost), DebugConsole is shown.
+      */}
       {!isLiveSite && <DebugConsole />}
       
       <div className="flex-1 w-full h-full relative z-10 flex flex-col">
