@@ -7,6 +7,7 @@ const Login: React.FC = () => {
   const [password, setPassword] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [imgError, setImgError] = useState(false);
   
   const handleGoogleLogin = async () => {
     try {
@@ -69,8 +70,17 @@ const Login: React.FC = () => {
 
   return (
     <div className="flex flex-col items-center justify-center h-full w-full bg-background p-6">
-      <div className="w-24 h-24 rounded-full bg-zinc-900 mb-8 overflow-hidden border border-zinc-800 shadow-2xl shadow-white/5">
-        <img src="/public/icon-512.png" alt="Rooms Icon" className="w-full h-full object-cover" />
+      <div className="w-24 h-24 rounded-full bg-zinc-900 mb-8 overflow-hidden border border-zinc-800 shadow-2xl shadow-white/5 flex items-center justify-center">
+        {!imgError ? (
+            <img 
+                src="/icon-512.png" 
+                alt="Rooms Icon" 
+                className="w-full h-full object-cover" 
+                onError={() => setImgError(true)}
+            />
+        ) : (
+            <div className="text-white text-3xl font-bold">R</div>
+        )}
       </div>
       <h1 className="text-4xl font-bold tracking-tight text-white mb-2">Rooms</h1>
       <p className="text-muted text-sm mb-8">Advanced, dark, seamless communication.</p>
