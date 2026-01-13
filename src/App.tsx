@@ -95,7 +95,7 @@ export default function App() {
         if (!isChattingWithSender && Notification.permission === 'granted') {
             const title = payload.notification?.title || payload.data?.title || "New Message";
             const body = payload.notification?.body || payload.data?.body || "";
-            new Notification(title, { body, icon: '/icon-192x192.png' });
+            new Notification(title, { body, icon: '/icon-192.png' });
         }
     });
 

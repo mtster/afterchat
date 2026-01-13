@@ -73,7 +73,7 @@ const Login: React.FC = () => {
       <div className="w-24 h-24 rounded-full bg-zinc-900 mb-8 overflow-hidden border border-zinc-800 shadow-2xl shadow-white/5 flex items-center justify-center">
         {!imgError ? (
             <img 
-                src="/icon-512x512.png" 
+                src="/icon-512.png" 
                 alt="Rooms Icon" 
                 className="w-full h-full object-cover" 
                 onError={() => setImgError(true)}
