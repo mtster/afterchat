@@ -137,13 +137,22 @@ export const findUserByEmailOrUsername = async (searchTerm: string): Promise<Roo
 
   const runQuery = async (field: string, value: string) => {
       console.log(`[Search_Step] Checking ${field} == "${value}"`);
-      const q = query(roomersRef, orderByChild(field), equalTo(value));
-      const snap = await get(q);
-      if (snap.exists()) {
-          const val = snap.val();
-          const uid = Object.keys(val)[0];
-          console.log(`[Search_Step] Success! Match in ${field}. UID: ${uid}`);
-          return { uid, data: val[uid] };
+      try {
+        const q = query(roomersRef, orderByChild(field), equalTo(value));
+        const snap = await get(q);
+        if (snap.exists()) {
+            const val = snap.val();
+            const uid = Object.keys(val)[0];
+            console.log(`[Search_Step] Success! Match in ${field}. UID: ${uid}`);
+            return { uid, data: val[uid] };
+        }
+      } catch (e: any) {
+        // Catch Missing Index Error specific to Firebase
+        if (e.message && e.message.includes("Index not defined")) {
+             console.error(`[Search_Fatal] Missing index for '${field}'.`);
+             throw new Error(`MISSING_INDEX:${field}`);
+        }
+        throw e;
       }
       return null;
   };

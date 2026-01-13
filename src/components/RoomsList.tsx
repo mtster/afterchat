@@ -75,7 +75,12 @@ export default function RoomsList({ currentUser, roomers, loading, onNavigateCha
       setSearchError('');
     } catch (err: any) {
       console.error("[Add_Flow] Fatal Error:", err.message);
-      setSearchError("Database error. Please check your connection.");
+      if (err.message && err.message.startsWith("MISSING_INDEX:")) {
+          const field = err.message.split(":")[1];
+          setSearchError(`System Error: Missing Index on '${field}'. Update Firebase Rules.`);
+      } else {
+          setSearchError("Database error. Please check your connection.");
+      }
     } finally {
       setIsProcessing(false);
     }
