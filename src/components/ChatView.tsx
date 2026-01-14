@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { ref, push, onValue, serverTimestamp, get, child, update, onDisconnect, query, orderByChild, limitToLast, startAt, off, endBefore } from 'firebase/database';
 import { db } from '../services/firebase';
+import { getCachedMessages, saveMessageToCache, saveBatchMessages } from '../services/indexedDB';
 import { Message, UserProfile, Roomer } from '../types';
 
 interface ChatViewProps {
@@ -10,19 +11,26 @@ interface ChatViewProps {
   onBack: () => void;
 }
 
+const PULL_THRESHOLD = 80; // Pixels to pull down to trigger load
+
 const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onBack }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isVisible, setIsVisible] = useState(false);
+  
+  // Pull to Refresh State
+  const [pullOffset, setPullOffset] = useState(0);
+  const [isPulling, setIsPulling] = useState(false);
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const [allLoaded, setAllLoaded] = useState(false);
   
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const isInitialLoad = useRef(true);
+  
+  const isInitialMount = useRef(true);
+  const touchStartY = useRef(0);
   const previousScrollHeight = useRef(0);
-  const loadingTriggerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   const isAccepted = recipient.status === 'accepted';
   const isPendingOutgoing = recipient.status === 'pending_outgoing';
@@ -34,7 +42,7 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
     return () => clearTimeout(timer);
   }, []);
 
-  // INSTANT PRESENCE SCHEME
+  // INSTANT PRESENCE
   useEffect(() => {
     if (!currentUser.uid) return;
     const userRef = ref(db, `roomers/${currentUser.uid}`);
@@ -67,17 +75,45 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
     setTimeout(onBack, 300);
   };
 
-  // INITIAL LOAD & REALTIME NEW MESSAGES
+  // HYBRID DATA LOADING: INDEXEDDB + NETWORK
   useEffect(() => {
-    const messagesRef = ref(db, `messages/${roomId}`);
     let unsubscribe: () => void;
+    const messagesRef = ref(db, `messages/${roomId}`);
 
-    // Reset initial load flag when entering a new room
-    isInitialLoad.current = true;
+    const initData = async () => {
+        // 1. Load from Cache First
+        console.log("[Data] Checking IndexedDB...");
+        const cached = await getCachedMessages(roomId);
+        
+        let startTimestamp = 0;
 
-    const loadData = async () => {
-        console.log(`[DB_OPTIMIZATION] Fresh Load: Fetching last 25 messages from Network`);
-        const q = query(messagesRef, orderByChild('timestamp'), limitToLast(25));
+        if (cached.length > 0) {
+            console.log(`[Data] Loaded ${cached.length} messages from cache.`);
+            setMessages(cached);
+            startTimestamp = cached[cached.length - 1].timestamp + 1;
+            
+            // Scroll to bottom immediately if cached
+            if (isInitialMount.current && containerRef.current) {
+                // Use a slight timeout to allow render
+                setTimeout(() => {
+                    if (containerRef.current) containerRef.current.scrollTop = containerRef.current.scrollHeight;
+                }, 0);
+            }
+        } else {
+             console.log("[Data] No cache found. Doing full fresh load.");
+             // If no cache, we might want to fetch last 25 from network
+        }
+
+        // 2. Listen for NEW messages from Network (Sync)
+        // If we have cache, only get messages NEWER than last cached
+        // If no cache, startTimestamp is 0, so we likely want to limitToLast(25) to avoid downloading history
+        
+        let q;
+        if (cached.length > 0) {
+            q = query(messagesRef, orderByChild('timestamp'), startAt(startTimestamp));
+        } else {
+            q = query(messagesRef, orderByChild('timestamp'), limitToLast(25));
+        }
 
         unsubscribe = onValue(q, (snapshot) => {
             const data = snapshot.val();
@@ -86,21 +122,27 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
                     id: key,
                     ...val
                 })).sort((a, b) => a.timestamp - b.timestamp);
+                
+                // Save to Cache
+                saveBatchMessages(roomId, newMessages);
 
                 setMessages(prev => {
+                    // Dedup logic
                     const existingIds = new Set(prev.map(m => m.id));
                     const uniqueNew = newMessages.filter(m => !existingIds.has(m.id));
                     
                     if (uniqueNew.length === 0) return prev;
                     
-                    console.log(`[DB_OPTIMIZATION] Realtime update: ${uniqueNew.length} new messages.`);
+                    console.log(`[Data] Received ${uniqueNew.length} new messages from network.`);
                     return [...prev, ...uniqueNew].sort((a, b) => a.timestamp - b.timestamp);
                 });
             }
         });
+        
+        isInitialMount.current = false;
     };
 
-    loadData();
+    initData();
 
     return () => {
         if (unsubscribe) unsubscribe();
@@ -108,13 +150,17 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
     };
   }, [roomId]);
 
+
   // PAGINATION: LOAD OLDER MESSAGES
   const loadOlderMessages = async () => {
-      if (isLoadingOlder || allLoaded || messages.length === 0) return;
-      
-      setIsLoadingOlder(true);
+      if (messages.length === 0 || allLoaded) {
+          setIsLoadingOlder(false);
+          setPullOffset(0);
+          return;
+      }
+
       const oldestMsg = messages[0];
-      console.log(`[Pagination] Loading older messages before: ${oldestMsg.timestamp}`);
+      console.log(`[Pagination] Fetching older than ${oldestMsg.timestamp}`);
 
       try {
           const messagesRef = ref(db, `messages/${roomId}`);
@@ -133,80 +179,91 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
                   ...val
               })).sort((a, b) => a.timestamp - b.timestamp);
 
-              console.log(`[Pagination] Loaded ${olderMessages.length} older messages.`);
+              console.log(`[Pagination] Retrieved ${olderMessages.length} older messages.`);
 
-              if (olderMessages.length < 10) {
-                  setAllLoaded(true);
-              }
+              if (olderMessages.length < 10) setAllLoaded(true);
 
-              // Capture scroll height before DOM update to maintain position
+              // Capture scroll height before DOM update
               if (containerRef.current) {
                   previousScrollHeight.current = containerRef.current.scrollHeight;
               }
 
+              // Update State AND Cache
+              saveBatchMessages(roomId, olderMessages);
               setMessages(prev => [...olderMessages, ...prev]);
           } else {
-              console.log(`[Pagination] No more older messages.`);
+              console.log("[Pagination] No more history.");
               setAllLoaded(true);
           }
       } catch (e) {
-          console.error("[Pagination] Error:", e);
+          console.error("[Pagination] Error", e);
       } finally {
           setIsLoadingOlder(false);
+          setPullOffset(0); // Reset pull animation
       }
   };
 
-  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-      // 1. Disable listener during initial load
-      if (isInitialLoad.current) return;
 
-      // 2. Throttled "Ceiling" Check
-      // Only trigger if user stays near top for 500ms (avoids accidental triggers on fast scroll)
-      const scrollTop = e.currentTarget.scrollTop;
-      
-      if (scrollTop < 30 && !isLoadingOlder && !allLoaded) {
-          if (!loadingTriggerRef.current) {
-              loadingTriggerRef.current = setTimeout(() => {
-                  // Double check after timeout if we are still at the top
-                  if (containerRef.current && containerRef.current.scrollTop < 30) {
-                      loadOlderMessages();
-                  }
-                  loadingTriggerRef.current = null;
-              }, 500); 
-          }
+  // --- TOUCH / PULL HANDLERS ---
+  const handleTouchStart = (e: React.TouchEvent) => {
+      if (!containerRef.current) return;
+      // Only enable pull if at the very top
+      if (containerRef.current.scrollTop <= 0) {
+          touchStartY.current = e.touches[0].clientY;
+          setIsPulling(true);
       } else {
-          // If user scrolls away from top, cancel the trigger
-          if (loadingTriggerRef.current) {
-              clearTimeout(loadingTriggerRef.current);
-              loadingTriggerRef.current = null;
-          }
+          setIsPulling(false);
       }
   };
 
-  // SCROLL POSITION MANAGEMENT
+  const handleTouchMove = (e: React.TouchEvent) => {
+      if (!isPulling || !containerRef.current) return;
+      
+      const currentY = e.touches[0].clientY;
+      const diff = currentY - touchStartY.current;
+
+      // Only allow dragging DOWN (positive diff) and if we are at top
+      if (diff > 0 && containerRef.current.scrollTop <= 0 && !isLoadingOlder && !allLoaded) {
+          // Add resistance to the pull (logarithmic or divided)
+          const resistedDiff = Math.min(diff * 0.4, 150); 
+          setPullOffset(resistedDiff);
+          
+          // Prevent native scroll if we are strictly pulling for refresh
+          if (e.cancelable) e.preventDefault(); 
+      } else {
+          setPullOffset(0);
+      }
+  };
+
+  const handleTouchEnd = () => {
+      if (!isPulling) return;
+      setIsPulling(false);
+
+      if (pullOffset > PULL_THRESHOLD) {
+          setIsLoadingOlder(true);
+          // Snap to a loading position
+          setPullOffset(50);
+          loadOlderMessages();
+      } else {
+          // Snap back to 0
+          setPullOffset(0);
+      }
+  };
+
+  // SCROLL ADJUSTER
   useEffect(() => {
-    // 1. Initial Load: Instant Jump to Bottom
-    if (isInitialLoad.current && messages.length > 0) {
-        if (containerRef.current) {
-            containerRef.current.scrollTop = containerRef.current.scrollHeight;
-        }
-        // Small delay to ensure DOM paint before enabling scroll listener
-        setTimeout(() => {
-            isInitialLoad.current = false;
-        }, 100);
-    } 
-    // 2. Pagination Load: Maintain Relative Position
-    else if (previousScrollHeight.current > 0 && containerRef.current) {
+    // Maintain relative position after loading older messages
+    if (previousScrollHeight.current > 0 && containerRef.current) {
         const newScrollHeight = containerRef.current.scrollHeight;
         const diff = newScrollHeight - previousScrollHeight.current;
         containerRef.current.scrollTop = diff;
-        previousScrollHeight.current = 0; // Reset
-    }
-    // 3. New Message: Smooth Scroll
-    else if (!isLoadingOlder && bottomRef.current) {
+        previousScrollHeight.current = 0;
+    } 
+    // Auto-scroll on NEW message (if near bottom)
+    else if (!isLoadingOlder && bottomRef.current && !isInitialMount.current && pullOffset === 0) {
         bottomRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages, isLoadingOlder]);
+  }, [messages, isLoadingOlder, pullOffset]);
 
 
   const handleSend = async (e: React.FormEvent) => {
@@ -217,13 +274,21 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
     setInputText('');
     if (inputRef.current) inputRef.current.focus();
 
-    const messagesRef = ref(db, `messages/${roomId}`);
-    await push(messagesRef, {
+    const newMessage: any = {
       senderId: currentUser.uid,
       senderName: currentUser.displayName || 'User',
       text: text,
       timestamp: serverTimestamp()
-    });
+    };
+
+    const messagesRef = ref(db, `messages/${roomId}`);
+    const newRef = await push(messagesRef, newMessage);
+    
+    // Optimistic Cache (Optional, but safe since realtime listener will double check)
+    // We need the ID for cache, which push returns
+    if (newRef.key) {
+        saveMessageToCache(roomId, { id: newRef.key, ...newMessage, timestamp: Date.now() });
+    }
 
     // VERCEL NOTIFICATION API
     try {
@@ -233,37 +298,45 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
             const targetToken = val.fcmToken;
             const recipientActiveRoom = val.activeRoom;
 
-            // Only send if recipient is NOT looking at this room
             if (targetToken && recipientActiveRoom !== roomId) {
                  const mySnapshot = await get(child(ref(db), `roomers/${currentUser.uid}`));
                  const myData = mySnapshot.exists() ? mySnapshot.val() : {};
-                 const rawUsername = myData.username || '';
                  const displayName = myData.displayName || currentUser.displayName || 'Rooms User';
+                 
+                 const origin = typeof window !== 'undefined' && window.location.origin ? window.location.origin : '';
+                 const endpoint = `${origin}/api/notify`;
 
-                 console.log(`[Vercel] Triggering Notification to ${targetToken.substring(0, 10)}...`);
+                 console.log(`[Vercel] Triggering Notification via ${endpoint}`);
+                 console.log(`[Vercel] Target: ${targetToken.substring(0, 10)}...`);
 
-                 fetch('/api/notify', {
+                 fetch(endpoint, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         token: targetToken,
                         title: `New Message from ${displayName}`,
                         body: text,
-                        data: {
-                            roomId: roomId,
-                            senderId: currentUser.uid
-                        }
+                        data: { roomId: roomId, senderId: currentUser.uid }
                     })
                  })
                  .then(async res => {
-                     const data = await res.json();
-                     if (res.ok) {
-                         console.log("[Vercel] SUCCESS: Notification Sent", data);
-                     } else {
-                         console.error("[Vercel] ERROR: API Responded with", data);
+                     if (!res.ok) {
+                         console.error(`[Vercel] HTTP Error: ${res.status} ${res.statusText}`);
+                         try {
+                             const errBody = await res.text();
+                             console.error(`[Vercel] Response Body: ${errBody}`);
+                         } catch (e) {}
+                         return;
                      }
+                     const data = await res.json();
+                     console.log("[Vercel] SUCCESS: Notification Sent", data);
                  })
-                 .catch(e => console.error("[Vercel] ERROR: Network or Fetch failed", e));
+                 .catch(error => {
+                     // Detailed Error Logging for Empty Objects
+                     console.error("[Vercel] Network Fetch FAILED");
+                     const errorDetails = JSON.stringify(error, Object.getOwnPropertyNames(error));
+                     console.error(`[Vercel] Details: ${errorDetails}`);
+                 });
 
             } else {
                  console.log("[Vercel] Skipped: Recipient active in room.");
@@ -277,20 +350,10 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
   const formatMessageWithLinks = (text: string) => {
     const urlRegex = /(https?:\/\/[^\s]+)/g;
     const parts = text.split(urlRegex);
-    
     return parts.map((part, index) => {
       if (part.match(urlRegex)) {
         return (
-          <a
-            key={index}
-            href={part}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline underline-offset-2 break-all cursor-pointer opacity-90 hover:opacity-100"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {part}
-          </a>
+          <a key={index} href={part} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 break-all cursor-pointer opacity-90 hover:opacity-100" onClick={(e) => e.stopPropagation()}>{part}</a>
         );
       }
       return part;
@@ -299,6 +362,8 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
 
   return (
     <div className={`flex flex-col h-[100dvh] w-screen bg-background fixed inset-0 z-20 transition-transform duration-300 ease-in-out ${isVisible ? 'translate-x-0' : 'translate-x-full'}`}>
+      
+      {/* Header */}
       <div className="flex-none grid grid-cols-6 items-center px-4 py-3 border-b border-border bg-background/90 backdrop-blur-md sticky top-0 z-50" style={{ paddingTop: 'max(16px, env(safe-area-inset-top))' }}>
         <button onClick={handleBack} className="col-span-1 justify-self-start text-white p-2 -ml-2 active:opacity-50">
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
@@ -309,31 +374,55 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
         <div className="col-span-1" />
       </div>
 
+      {/* Chat Container with Touch Listeners */}
       <div 
         ref={containerRef}
-        onScroll={handleScroll}
-        style={{ overflowAnchor: 'auto' }}
-        className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar bg-background w-full"
+        className="flex-1 overflow-y-auto no-scrollbar bg-background w-full relative"
+        style={{ overflowAnchor: 'auto', touchAction: 'pan-y' }}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
       >
-        {isLoadingOlder && (
-            <div className="flex justify-center py-2">
-                <div className="w-5 h-5 border-2 border-zinc-700 border-t-white rounded-full animate-spin"></div>
+        {/* Pull to Refresh Indicator - sits absolutely at top, or pushes content down */}
+        <div 
+            style={{ 
+                height: `${pullOffset}px`, 
+                overflow: 'hidden',
+                transition: isPulling ? 'none' : 'height 0.3s cubic-bezier(0.25, 0.8, 0.25, 1)' 
+            }}
+            className="w-full flex items-end justify-center pb-2 bg-background/50"
+        >
+            <div className="flex flex-col items-center gap-1 opacity-80">
+                {isLoadingOlder ? (
+                    <div className="w-5 h-5 border-2 border-zinc-600 border-t-white rounded-full animate-spin"></div>
+                ) : (
+                    <>
+                        <svg className={`w-5 h-5 text-zinc-500 transition-transform duration-200 ${pullOffset > PULL_THRESHOLD ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" /></svg>
+                        <span className="text-[10px] uppercase tracking-widest text-zinc-600 font-bold">
+                            {pullOffset > PULL_THRESHOLD ? 'Release to Load' : 'Pull for History'}
+                        </span>
+                    </>
+                )}
             </div>
-        )}
-        
-        {messages.map((msg) => {
-          const isMe = msg.senderId === currentUser.uid;
-          return (
-            <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[75%] px-4 py-2 rounded-2xl text-[15px] leading-snug break-words ${isMe ? 'bg-blue-600 text-white rounded-tr-sm' : 'bg-zinc-800 text-zinc-100 rounded-tl-sm'}`}>
-                {formatMessageWithLinks(msg.text)}
-              </div>
-            </div>
-          );
-        })}
-        <div ref={bottomRef} className="h-4" />
+        </div>
+
+        {/* Messages */}
+        <div className="p-4 space-y-4 min-h-[101%]"> {/* min-h-101% ensures scroll capability for pull gesture even if few messages */}
+            {messages.map((msg) => {
+              const isMe = msg.senderId === currentUser.uid;
+              return (
+                <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[75%] px-4 py-2 rounded-2xl text-[15px] leading-snug break-words ${isMe ? 'bg-blue-600 text-white rounded-tr-sm' : 'bg-zinc-800 text-zinc-100 rounded-tl-sm'}`}>
+                    {formatMessageWithLinks(msg.text)}
+                  </div>
+                </div>
+              );
+            })}
+            <div ref={bottomRef} className="h-4" />
+        </div>
       </div>
 
+      {/* Input Area */}
       <div className="flex-none p-3 bg-zinc-900 border-t border-border z-30 w-full" style={{ paddingBottom: 'max(10px, env(safe-area-inset-bottom))' }}>
         {!isAccepted ? (
             <div className="w-full py-3 text-center text-zinc-400 text-sm font-medium bg-zinc-950/50 rounded-lg border border-zinc-800">
