@@ -20,8 +20,9 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const isFirstLoad = useRef(true);
+  const isInitialLoad = useRef(true);
   const previousScrollHeight = useRef(0);
+  const loadingTriggerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   const isAccepted = recipient.status === 'accepted';
   const isPendingOutgoing = recipient.status === 'pending_outgoing';
@@ -68,17 +69,14 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
 
   // INITIAL LOAD & REALTIME NEW MESSAGES
   useEffect(() => {
-    const CACHE_KEY = `chat_cache_${roomId}`;
     const messagesRef = ref(db, `messages/${roomId}`);
     let unsubscribe: () => void;
 
+    // Reset initial load flag when entering a new room
+    isInitialLoad.current = true;
+
     const loadData = async () => {
-        // 1. Determine Fetch Strategy
-        // We load the last 25 initially
         console.log(`[DB_OPTIMIZATION] Fresh Load: Fetching last 25 messages from Network`);
-        
-        // Listen to updates. If we have cached messages, we could startAt(lastCache), 
-        // but for pagination simplicity, we'll start with limitToLast(25) and listen for additions.
         const q = query(messagesRef, orderByChild('timestamp'), limitToLast(25));
 
         unsubscribe = onValue(q, (snapshot) => {
@@ -90,14 +88,9 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
                 })).sort((a, b) => a.timestamp - b.timestamp);
 
                 setMessages(prev => {
-                    // Merge logic: ensure we don't overwrite older messages loaded via pagination
-                    // We only want to update/append the 'tail' of the conversation or update existing IDs
-                    
                     const existingIds = new Set(prev.map(m => m.id));
                     const uniqueNew = newMessages.filter(m => !existingIds.has(m.id));
                     
-                    // If everything is duplicate, check for updates (like read receipts, though not implemented yet)
-                    // For now, simple merge
                     if (uniqueNew.length === 0) return prev;
                     
                     console.log(`[DB_OPTIMIZATION] Realtime update: ${uniqueNew.length} new messages.`);
@@ -125,7 +118,6 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
 
       try {
           const messagesRef = ref(db, `messages/${roomId}`);
-          // Fetch 10 messages strictly BEFORE the current oldest one
           const q = query(
               messagesRef, 
               orderByChild('timestamp'), 
@@ -147,7 +139,7 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
                   setAllLoaded(true);
               }
 
-              // Capture scroll height before DOM update
+              // Capture scroll height before DOM update to maintain position
               if (containerRef.current) {
                   previousScrollHeight.current = containerRef.current.scrollHeight;
               }
@@ -165,29 +157,53 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
   };
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-      if (e.currentTarget.scrollTop === 0 && !isLoadingOlder && !allLoaded) {
-          loadOlderMessages();
+      // 1. Disable listener during initial load
+      if (isInitialLoad.current) return;
+
+      // 2. Throttled "Ceiling" Check
+      // Only trigger if user stays near top for 500ms (avoids accidental triggers on fast scroll)
+      const scrollTop = e.currentTarget.scrollTop;
+      
+      if (scrollTop < 30 && !isLoadingOlder && !allLoaded) {
+          if (!loadingTriggerRef.current) {
+              loadingTriggerRef.current = setTimeout(() => {
+                  // Double check after timeout if we are still at the top
+                  if (containerRef.current && containerRef.current.scrollTop < 30) {
+                      loadOlderMessages();
+                  }
+                  loadingTriggerRef.current = null;
+              }, 500); 
+          }
+      } else {
+          // If user scrolls away from top, cancel the trigger
+          if (loadingTriggerRef.current) {
+              clearTimeout(loadingTriggerRef.current);
+              loadingTriggerRef.current = null;
+          }
       }
   };
 
   // SCROLL POSITION MANAGEMENT
   useEffect(() => {
-    // If it's first load, scroll to bottom
-    if (isFirstLoad.current && messages.length > 0) {
-        bottomRef.current?.scrollIntoView({ behavior: 'instant' });
-        isFirstLoad.current = false;
+    // 1. Initial Load: Instant Jump to Bottom
+    if (isInitialLoad.current && messages.length > 0) {
+        if (containerRef.current) {
+            containerRef.current.scrollTop = containerRef.current.scrollHeight;
+        }
+        // Small delay to ensure DOM paint before enabling scroll listener
+        setTimeout(() => {
+            isInitialLoad.current = false;
+        }, 100);
     } 
-    // If we just loaded OLDER messages, maintain relative scroll position
+    // 2. Pagination Load: Maintain Relative Position
     else if (previousScrollHeight.current > 0 && containerRef.current) {
         const newScrollHeight = containerRef.current.scrollHeight;
         const diff = newScrollHeight - previousScrollHeight.current;
         containerRef.current.scrollTop = diff;
         previousScrollHeight.current = 0; // Reset
     }
-    // If a NEW message arrived (at the bottom), scroll to it if user is near bottom
-    // (Simplification: always scroll to bottom on new message for now)
+    // 3. New Message: Smooth Scroll
     else if (!isLoadingOlder && bottomRef.current) {
-        // Only smooth scroll if we are not loading history
         bottomRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages, isLoadingOlder]);
@@ -217,14 +233,14 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
             const targetToken = val.fcmToken;
             const recipientActiveRoom = val.activeRoom;
 
+            // Only send if recipient is NOT looking at this room
             if (targetToken && recipientActiveRoom !== roomId) {
                  const mySnapshot = await get(child(ref(db), `roomers/${currentUser.uid}`));
                  const myData = mySnapshot.exists() ? mySnapshot.val() : {};
                  const rawUsername = myData.username || '';
-                 const cleanUsername = rawUsername.startsWith('$') ? rawUsername.substring(1) : rawUsername;
                  const displayName = myData.displayName || currentUser.displayName || 'Rooms User';
 
-                 console.log(`[Notification] Sending via Vercel API to ${targetToken.substring(0, 10)}...`);
+                 console.log(`[Vercel] Triggering Notification to ${targetToken.substring(0, 10)}...`);
 
                  fetch('/api/notify', {
                     method: 'POST',
@@ -239,16 +255,22 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
                         }
                     })
                  })
-                 .then(res => res.json())
-                 .then(data => console.log("[Notification] Vercel Response:", data))
-                 .catch(e => console.error("[Notification] Vercel Error:", e));
+                 .then(async res => {
+                     const data = await res.json();
+                     if (res.ok) {
+                         console.log("[Vercel] SUCCESS: Notification Sent", data);
+                     } else {
+                         console.error("[Vercel] ERROR: API Responded with", data);
+                     }
+                 })
+                 .catch(e => console.error("[Vercel] ERROR: Network or Fetch failed", e));
 
             } else {
-                 console.log("[Notification] Recipient active in room. Skipped.");
+                 console.log("[Vercel] Skipped: Recipient active in room.");
             }
         }
     } catch (e: any) {
-        console.error("[Notification] Logic failed", e.message);
+        console.error("[Vercel] Logic failed", e.message);
     }
   };
 
@@ -290,6 +312,7 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
       <div 
         ref={containerRef}
         onScroll={handleScroll}
+        style={{ overflowAnchor: 'auto' }}
         className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar bg-background w-full"
       >
         {isLoadingOlder && (

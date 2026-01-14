@@ -26,6 +26,8 @@ if (!admin.apps.length) {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  console.log('Sending FCM via Vercel...');
+
   // Only allow POST requests
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -70,7 +72,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     console.log(`[API] Sending notification to ${token.slice(0, 10)}...`);
     const response = await admin.messaging().send(message);
-    console.log(`[API] Successfully sent message: ${response}`);
+    console.log(`FCM Success: ${response}`);
     
     return res.status(200).json({ success: true, messageId: response });
   } catch (error: any) {

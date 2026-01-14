@@ -34,6 +34,7 @@ export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [loadingAuth, setLoadingAuth] = useState(true);
   const viewRef = useRef<AppView>(view);
+  const lastRoomersSnapshotRef = useRef<string>('');
 
   useEffect(() => {
     localStorage.setItem('rooms_app_view', JSON.stringify(view));
@@ -96,11 +97,12 @@ export default function App() {
     return () => { if (unsubscribe) unsubscribe(); };
   }, []);
 
-  // Roomers Data Fetching WITH CACHING
+  // Roomers Data Fetching WITH CACHING & OPTIMIZATION
   useEffect(() => {
     if (!user) {
         setRoomers([]);
         setLoadingRoomers(false);
+        lastRoomersSnapshotRef.current = '';
         return;
     }
 
@@ -119,12 +121,26 @@ export default function App() {
 
     const userRef = ref(db, `roomers/${user.uid}`);
     
-    // 2. Background Sync
+    // 2. Background Sync with Diff Check
     const unsub = onValue(userRef, async (snapshot) => {
       const data = snapshot.val();
-      const allRoomers: Roomer[] = [];
       
+      // Optimization: Create a signature of the fields we care about.
+      // We ignore 'activeRoom', 'lastOnline', etc.
+      const syncSignature = JSON.stringify({
+          added: data?.addedRoomers,
+          pending: data?.pendingApprovals
+      });
+
+      if (syncSignature === lastRoomersSnapshotRef.current) {
+          // Data affecting the list hasn't changed. Ignore this update.
+          return;
+      }
+      
+      lastRoomersSnapshotRef.current = syncSignature;
       console.log("[DB_OPTIMIZATION] Fetching updated Roomers List from Network...");
+      
+      const allRoomers: Roomer[] = [];
       
       if (data) {
         if (data.addedRoomers) {
