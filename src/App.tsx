@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { auth, updateUserProfile, requestAndStoreToken, onMessageListener, db, getRoomerDetails } from './services/firebase';
 import { onAuthStateChanged, User, getRedirectResult, setPersistence, browserLocalPersistence } from 'firebase/auth';
-import { ref, onValue } from 'firebase/database';
+import { ref, onValue, update } from 'firebase/database';
 import Login from './components/Login';
 import ChatView from './components/ChatView';
 import RoomsList from './components/RoomsList';
@@ -40,6 +40,19 @@ export default function App() {
     localStorage.setItem('rooms_app_view', JSON.stringify(view));
     viewRef.current = view;
   }, [view]);
+
+  // PRESENCE HEARTBEAT (Update lastOnline every 15s)
+  useEffect(() => {
+    if (!user) return;
+    const heartbeat = setInterval(() => {
+        if (document.visibilityState === 'visible') {
+            // We use update (not set) to avoid overwriting other fields
+            update(ref(db, `roomers/${user.uid}`), { lastOnline: Date.now() }).catch(() => {});
+        }
+    }, 15000); // 15 seconds
+    
+    return () => clearInterval(heartbeat);
+  }, [user]);
 
   // Central Auth & Profile Sync Logic
   useEffect(() => {
@@ -125,15 +138,12 @@ export default function App() {
     const unsub = onValue(userRef, async (snapshot) => {
       const data = snapshot.val();
       
-      // Optimization: Create a signature of the fields we care about.
-      // We ignore 'activeRoom', 'lastOnline', etc.
       const syncSignature = JSON.stringify({
           added: data?.addedRoomers,
           pending: data?.pendingApprovals
       });
 
       if (syncSignature === lastRoomersSnapshotRef.current) {
-          // Data affecting the list hasn't changed. Ignore this update.
           return;
       }
       
@@ -160,7 +170,6 @@ export default function App() {
       }
       const unique = Array.from(new Map(allRoomers.map(item => [item.uid, item])).values());
       
-      // Update State & Cache
       setRoomers(unique);
       setLoadingRoomers(false);
       localStorage.setItem(CACHE_KEY, JSON.stringify(unique));

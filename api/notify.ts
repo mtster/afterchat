@@ -1,30 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import * as admin from 'firebase-admin';
 
-// Initialize Firebase Admin SDK if not already initialized
-if (!admin.apps.length) {
-  try {
-    const serviceAccount = {
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      // Handle newline characters in private key for Vercel Env Vars
-      privateKey: process.env.FIREBASE_PRIVATE_KEY 
-        ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') 
-        : undefined,
-    };
-
-    if (!serviceAccount.projectId || !serviceAccount.clientEmail || !serviceAccount.privateKey) {
-        throw new Error("Missing Firebase Admin Environment Variables");
-    }
-
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
-    });
-  } catch (error) {
-    console.error('Firebase Admin Init Error:', error);
-  }
-}
-
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   console.log('Sending FCM via Vercel...');
 
@@ -34,13 +10,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
+    // 1. Initialize Firebase Admin (Only if not already initialized)
+    if (!admin.apps.length) {
+      const projectId = process.env.FIREBASE_PROJECT_ID;
+      const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+      let privateKey = process.env.FIREBASE_PRIVATE_KEY;
+
+      // Log configuration status (DO NOT log the actual key)
+      console.log(`[Config] Project: ${projectId}`);
+      console.log(`[Config] Email: ${clientEmail}`);
+      console.log(`[Config] Key Length: ${privateKey ? privateKey.length : 'MISSING'}`);
+
+      if (!projectId || !clientEmail || !privateKey) {
+          throw new Error("Missing Firebase Admin Environment Variables");
+      }
+
+      // CRITICAL: Fix Vercel Environment Variable newlines
+      // If the key is wrapped in quotes in Vercel UI, the \n might be literal characters.
+      if (privateKey) {
+        privateKey = privateKey.replace(/\\n/g, '\n');
+      }
+
+      admin.initializeApp({
+        credential: admin.credential.cert({
+          projectId,
+          clientEmail,
+          privateKey,
+        }),
+      });
+      console.log("[Config] Firebase Admin Initialized Successfully");
+    }
+
     const { token, title, body, data } = req.body;
 
     if (!token || !title || !body) {
       return res.status(400).json({ error: 'Missing token, title, or body' });
     }
 
-    // Add rocket emoji for verification
     const finalBody = `🚀 ${body}`;
 
     const message = {
@@ -49,9 +55,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         title: title,
         body: finalBody,
       },
-      // Optional data payload
       data: data || {},
-      // Android specific config for high priority
       android: {
         priority: 'high' as const,
         notification: {
@@ -59,7 +63,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           color: '#000000'
         }
       },
-      // APNS (Apple) specific config
       apns: {
         payload: {
           aps: {
@@ -70,13 +73,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     };
 
-    console.log(`[API] Sending notification to ${token.slice(0, 10)}...`);
+    console.log(`[API] Sending to: ${token.slice(0, 10)}...`);
     const response = await admin.messaging().send(message);
-    console.log(`FCM Success: ${response}`);
+    console.log(`[API] Success Message ID: ${response}`);
     
     return res.status(200).json({ success: true, messageId: response });
   } catch (error: any) {
-    console.error('[API] FCM Send Error:', error);
-    return res.status(500).json({ error: error.message || 'Internal Server Error' });
+    // Robust Error Logging
+    console.error('[API] FCM Fatal Error:', error);
+    
+    // Create a plain object from the error to ensure it stringifies correctly in logs
+    const errorLog = {
+      message: error.message,
+      stack: error.stack,
+      code: error.code,
+      details: error.errorInfo || error
+    };
+    
+    console.error('[API] Error Details:', JSON.stringify(errorLog, null, 2));
+    
+    return res.status(500).json({ 
+      error: error.message || 'Internal Server Error',
+      details: error.code || 'Unknown' 
+    });
   }
 }

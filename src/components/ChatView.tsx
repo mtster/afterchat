@@ -11,7 +11,7 @@ interface ChatViewProps {
   onBack: () => void;
 }
 
-const PULL_THRESHOLD = 80; // Pixels to pull down to trigger load
+const PULL_THRESHOLD = 80;
 
 const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onBack }) => {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -42,28 +42,45 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
     return () => clearTimeout(timer);
   }, []);
 
-  // INSTANT PRESENCE
+  // INSTANT PRESENCE & CLEANUP
   useEffect(() => {
     if (!currentUser.uid) return;
     const userRef = ref(db, `roomers/${currentUser.uid}`);
-    const setStatus = (status: string | null) => { update(userRef, { activeRoom: status }).catch(() => {}); };
+    
+    const setStatus = (status: string | null) => { 
+        update(userRef, { activeRoom: status, lastOnline: Date.now() }).catch(() => {}); 
+    };
 
     setStatus(roomId);
+    
+    // 1. Server-side Disconnect (Crash/Socket Close)
     const disconnectRef = onDisconnect(userRef);
     disconnectRef.update({ activeRoom: null });
 
+    // 2. Client-side Visibility (Tab Switch)
     const handleVisibility = () => {
-        if (document.visibilityState === 'hidden') setStatus(null);
-        else setStatus(roomId);
+        if (document.visibilityState === 'hidden') {
+            setStatus(null);
+        } else {
+            setStatus(roomId);
+        }
     };
-    const handleUnload = () => setStatus(null);
+
+    // 3. Client-side Unload/Background (iOS swipe away)
+    // 'pagehide' is more reliable than 'unload' on iOS
+    const handlePageHide = () => {
+        // We try to send a final update. 
+        // Note: Realtime Database SDK might not flush this in time if socket closes instantly,
+        // but it is the best client-side attempt we can make without sendBeacon + REST API Auth complexity.
+        setStatus(null);
+    };
 
     document.addEventListener('visibilitychange', handleVisibility);
-    window.addEventListener('beforeunload', handleUnload);
+    window.addEventListener('pagehide', handlePageHide);
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibility);
-      window.removeEventListener('beforeunload', handleUnload);
+      window.removeEventListener('pagehide', handlePageHide);
       disconnectRef.cancel();
       setStatus(null);
     };
@@ -81,7 +98,6 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
     const messagesRef = ref(db, `messages/${roomId}`);
 
     const initData = async () => {
-        // 1. Load from Cache First
         console.log("[Data] Checking IndexedDB...");
         const cached = await getCachedMessages(roomId);
         
@@ -92,22 +108,15 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
             setMessages(cached);
             startTimestamp = cached[cached.length - 1].timestamp + 1;
             
-            // Scroll to bottom immediately if cached
             if (isInitialMount.current && containerRef.current) {
-                // Use a slight timeout to allow render
                 setTimeout(() => {
                     if (containerRef.current) containerRef.current.scrollTop = containerRef.current.scrollHeight;
                 }, 0);
             }
         } else {
              console.log("[Data] No cache found. Doing full fresh load.");
-             // If no cache, we might want to fetch last 25 from network
         }
 
-        // 2. Listen for NEW messages from Network (Sync)
-        // If we have cache, only get messages NEWER than last cached
-        // If no cache, startTimestamp is 0, so we likely want to limitToLast(25) to avoid downloading history
-        
         let q;
         if (cached.length > 0) {
             q = query(messagesRef, orderByChild('timestamp'), startAt(startTimestamp));
@@ -123,11 +132,9 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
                     ...val
                 })).sort((a, b) => a.timestamp - b.timestamp);
                 
-                // Save to Cache
                 saveBatchMessages(roomId, newMessages);
 
                 setMessages(prev => {
-                    // Dedup logic
                     const existingIds = new Set(prev.map(m => m.id));
                     const uniqueNew = newMessages.filter(m => !existingIds.has(m.id));
                     
@@ -150,8 +157,6 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
     };
   }, [roomId]);
 
-
-  // PAGINATION: LOAD OLDER MESSAGES
   const loadOlderMessages = async () => {
       if (messages.length === 0 || allLoaded) {
           setIsLoadingOlder(false);
@@ -183,12 +188,10 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
 
               if (olderMessages.length < 10) setAllLoaded(true);
 
-              // Capture scroll height before DOM update
               if (containerRef.current) {
                   previousScrollHeight.current = containerRef.current.scrollHeight;
               }
 
-              // Update State AND Cache
               saveBatchMessages(roomId, olderMessages);
               setMessages(prev => [...olderMessages, ...prev]);
           } else {
@@ -199,15 +202,12 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
           console.error("[Pagination] Error", e);
       } finally {
           setIsLoadingOlder(false);
-          setPullOffset(0); // Reset pull animation
+          setPullOffset(0);
       }
   };
 
-
-  // --- TOUCH / PULL HANDLERS ---
   const handleTouchStart = (e: React.TouchEvent) => {
       if (!containerRef.current) return;
-      // Only enable pull if at the very top
       if (containerRef.current.scrollTop <= 0) {
           touchStartY.current = e.touches[0].clientY;
           setIsPulling(true);
@@ -218,17 +218,11 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
 
   const handleTouchMove = (e: React.TouchEvent) => {
       if (!isPulling || !containerRef.current) return;
-      
       const currentY = e.touches[0].clientY;
       const diff = currentY - touchStartY.current;
-
-      // Only allow dragging DOWN (positive diff) and if we are at top
       if (diff > 0 && containerRef.current.scrollTop <= 0 && !isLoadingOlder && !allLoaded) {
-          // Add resistance to the pull (logarithmic or divided)
           const resistedDiff = Math.min(diff * 0.4, 150); 
           setPullOffset(resistedDiff);
-          
-          // Prevent native scroll if we are strictly pulling for refresh
           if (e.cancelable) e.preventDefault(); 
       } else {
           setPullOffset(0);
@@ -238,33 +232,26 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
   const handleTouchEnd = () => {
       if (!isPulling) return;
       setIsPulling(false);
-
       if (pullOffset > PULL_THRESHOLD) {
           setIsLoadingOlder(true);
-          // Snap to a loading position
           setPullOffset(50);
           loadOlderMessages();
       } else {
-          // Snap back to 0
           setPullOffset(0);
       }
   };
 
-  // SCROLL ADJUSTER
   useEffect(() => {
-    // Maintain relative position after loading older messages
     if (previousScrollHeight.current > 0 && containerRef.current) {
         const newScrollHeight = containerRef.current.scrollHeight;
         const diff = newScrollHeight - previousScrollHeight.current;
         containerRef.current.scrollTop = diff;
         previousScrollHeight.current = 0;
     } 
-    // Auto-scroll on NEW message (if near bottom)
     else if (!isLoadingOlder && bottomRef.current && !isInitialMount.current && pullOffset === 0) {
         bottomRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages, isLoadingOlder, pullOffset]);
-
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -284,30 +271,32 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
     const messagesRef = ref(db, `messages/${roomId}`);
     const newRef = await push(messagesRef, newMessage);
     
-    // Optimistic Cache (Optional, but safe since realtime listener will double check)
-    // We need the ID for cache, which push returns
     if (newRef.key) {
         saveMessageToCache(roomId, { id: newRef.key, ...newMessage, timestamp: Date.now() });
     }
 
-    // VERCEL NOTIFICATION API
     try {
         const snapshot = await get(child(ref(db), `roomers/${recipient.uid}`));
         if (snapshot.exists()) {
             const val = snapshot.val();
             const targetToken = val.fcmToken;
             const recipientActiveRoom = val.activeRoom;
-
-            if (targetToken && recipientActiveRoom !== roomId) {
+            
+            // Stale Detection: If lastOnline was > 30s ago, consider them offline/backgrounded
+            const lastSeen = val.lastOnline || 0;
+            const isStale = (Date.now() - lastSeen) > 30000; // 30 seconds
+            
+            // NOTIFY IF: (Token Exists) AND ( (Not in room) OR (In room but Stale) )
+            if (targetToken && (recipientActiveRoom !== roomId || isStale)) {
                  const mySnapshot = await get(child(ref(db), `roomers/${currentUser.uid}`));
                  const myData = mySnapshot.exists() ? mySnapshot.val() : {};
                  const displayName = myData.displayName || currentUser.displayName || 'Rooms User';
                  
-                 const origin = typeof window !== 'undefined' && window.location.origin ? window.location.origin : '';
-                 const endpoint = `${origin}/api/notify`;
+                 // USE RELATIVE PATH to avoid CORS on preview deployments
+                 const endpoint = '/api/notify';
 
                  console.log(`[Vercel] Triggering Notification via ${endpoint}`);
-                 console.log(`[Vercel] Target: ${targetToken.substring(0, 10)}...`);
+                 console.log(`[Vercel] Target: ${targetToken.substring(0, 10)}... (Stale: ${isStale})`);
 
                  fetch(endpoint, {
                     method: 'POST',
@@ -321,21 +310,21 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
                  })
                  .then(async res => {
                      if (!res.ok) {
-                         console.error(`[Vercel] HTTP Error: ${res.status} ${res.statusText}`);
-                         try {
-                             const errBody = await res.text();
-                             console.error(`[Vercel] Response Body: ${errBody}`);
-                         } catch (e) {}
+                         const errText = await res.text();
+                         console.error(`[Vercel] HTTP Error ${res.status}: ${errText}`);
                          return;
                      }
                      const data = await res.json();
-                     console.log("[Vercel] SUCCESS: Notification Sent", data);
+                     console.log("[Vercel] SUCCESS:", data);
                  })
                  .catch(error => {
-                     // Detailed Error Logging for Empty Objects
                      console.error("[Vercel] Network Fetch FAILED");
-                     const errorDetails = JSON.stringify(error, Object.getOwnPropertyNames(error));
-                     console.error(`[Vercel] Details: ${errorDetails}`);
+                     // Log Full Error Object Properties
+                     const errObj = Object.getOwnPropertyNames(error).reduce((acc, key) => {
+                        acc[key] = (error as any)[key];
+                        return acc;
+                     }, {} as any);
+                     console.error(`[Vercel] Details:`, JSON.stringify(errObj));
                  });
 
             } else {
@@ -383,7 +372,6 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
       >
-        {/* Pull to Refresh Indicator - sits absolutely at top, or pushes content down */}
         <div 
             style={{ 
                 height: `${pullOffset}px`, 
@@ -406,8 +394,7 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
             </div>
         </div>
 
-        {/* Messages */}
-        <div className="p-4 space-y-4 min-h-[101%]"> {/* min-h-101% ensures scroll capability for pull gesture even if few messages */}
+        <div className="p-4 space-y-4 min-h-[101%]"> 
             {messages.map((msg) => {
               const isMe = msg.senderId === currentUser.uid;
               return (
