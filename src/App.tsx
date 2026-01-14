@@ -10,8 +10,6 @@ import DebugConsole from './components/DebugConsole';
 import { UserProfile, AppView, Roomer } from './types'; 
 
 // Environment Detection Logic
-// Production: 'afterchat.vercel.app' -> Debug Console HIDDEN
-// Development: 'afterchat-dev.vercel.app', 'localhost', etc. -> Debug Console VISIBLE
 const LIVE_PRODUCTION_URL = 'afterchat.vercel.app';
 const isLiveSite = typeof window !== 'undefined' && window.location.hostname === LIVE_PRODUCTION_URL;
 
@@ -49,7 +47,6 @@ export default function App() {
         try {
             await setPersistence(auth, browserLocalPersistence);
             
-            // Handle Redirect Result (Google Auth)
             try {
                 const result = await getRedirectResult(auth);
                 if (result?.user) {
@@ -66,15 +63,12 @@ export default function App() {
                 if (currentUser) {
                     setUser(currentUser);
                     setLoadingAuth(false);
-                    
-                    // Force Sync Profile on every auth state change
                     updateUserProfile(currentUser.uid, {
                         email: currentUser.email,
                         displayName: currentUser.displayName || currentUser.email?.split('@')[0] || 'User',
                         photoURL: currentUser.photoURL,
                         lastOnline: Date.now()
                     }).catch(() => {});
-                    
                     requestAndStoreToken(currentUser.uid);
                 } else {
                     setUser(null);
@@ -102,7 +96,7 @@ export default function App() {
     return () => { if (unsubscribe) unsubscribe(); };
   }, []);
 
-  // Roomers Data Fetching
+  // Roomers Data Fetching WITH CACHING
   useEffect(() => {
     if (!user) {
         setRoomers([]);
@@ -110,10 +104,28 @@ export default function App() {
         return;
     }
 
+    const CACHE_KEY = `roomers_list_cache_${user.uid}`;
+    
+    // 1. Instant Load from Cache
+    try {
+        const cached = localStorage.getItem(CACHE_KEY);
+        if (cached) {
+            const parsed = JSON.parse(cached);
+            setRoomers(parsed);
+            setLoadingRoomers(false);
+            console.log(`[DB_OPTIMIZATION] Loaded ${parsed.length} roomers from Local Cache.`);
+        }
+    } catch (e) { console.warn("Failed to load roomers cache"); }
+
     const userRef = ref(db, `roomers/${user.uid}`);
+    
+    // 2. Background Sync
     const unsub = onValue(userRef, async (snapshot) => {
       const data = snapshot.val();
       const allRoomers: Roomer[] = [];
+      
+      console.log("[DB_OPTIMIZATION] Fetching updated Roomers List from Network...");
+      
       if (data) {
         if (data.addedRoomers) {
              const addedUids = Object.keys(data.addedRoomers);
@@ -131,8 +143,12 @@ export default function App() {
         }
       }
       const unique = Array.from(new Map(allRoomers.map(item => [item.uid, item])).values());
+      
+      // Update State & Cache
       setRoomers(unique);
       setLoadingRoomers(false);
+      localStorage.setItem(CACHE_KEY, JSON.stringify(unique));
+      console.log(`[DB_OPTIMIZATION] Network Sync Complete. Cached ${unique.length} roomers.`);
     });
 
     return () => unsub();
@@ -169,11 +185,6 @@ export default function App() {
 
   return (
     <div className={`w-screen h-[100dvh] relative flex flex-col overflow-hidden ${isDarkMode ? 'bg-black text-white' : 'bg-gray-100 text-black'}`}>
-      {/* 
-          CONDITIONAL RENDER: 
-          If isLiveSite is TRUE (afterchat.vercel.app), DebugConsole is removed.
-          If isLiveSite is FALSE (afterchat-dev.vercel.app or localhost), DebugConsole is shown.
-      */}
       {!isLiveSite && <DebugConsole />}
       
       <div className="flex-1 w-full h-full relative z-10 flex flex-col">

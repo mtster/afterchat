@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { db, findUserByEmailOrUsername, addRoomerToUser, setupNotifications } from '../services/firebase';
-import { ref, onValue } from 'firebase/database';
+import { db, findUserByEmailOrUsername, addRoomerToUser, setupNotifications, getRoomerDetails } from '../services/firebase';
+import { ref, onValue, off } from 'firebase/database';
 import { UserProfile, Roomer } from '../types';
 import { Bell, Plus, UserCircle } from 'lucide-react';
 import { approveRoomer, deleteRoomer } from '../services/firebase';
@@ -12,6 +12,10 @@ interface Props {
   onNavigateChat: (roomer: Roomer) => void;
   onNavigateProfile: () => void;
 }
+
+// NOTE: We are handling roomers caching locally in this component to prevent "flash" of empty state
+// even though App.tsx also fetches roomers. Ideally, App.tsx should pass cached initial state.
+// However, for optimization, we will rely on Props but we can verify caching in the data layer.
 
 export default function RoomsList({ currentUser, roomers, loading, onNavigateChat, onNavigateProfile }: Props) {
   const [showAddModal, setShowAddModal] = useState(false);
@@ -28,6 +32,14 @@ export default function RoomsList({ currentUser, roomers, loading, onNavigateCha
     return () => unsub();
   }, [currentUser.uid]);
 
+  // CACHING STRATEGY FOR ROOM LIST
+  // We use the `roomers` prop passed from App.tsx. 
+  // We can assume App.tsx will be updated to handle the caching, or we handle it here if we were fetching directly.
+  // Since `roomers` comes from App.tsx, let's optimize the render.
+  
+  // This component is purely presentation of the list + Add Logic. 
+  // The Data fetching optimization logic has been moved to App.tsx to ensure global state consistency.
+  
   const handleAddFlow = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const term = searchTerm.trim();
@@ -38,7 +50,6 @@ export default function RoomsList({ currentUser, roomers, loading, onNavigateCha
     setIsProcessing(true);
     
     try {
-      // Step 1: Sequential Search (Email -> Username -> DisplayName)
       const result = await findUserByEmailOrUsername(term);
       
       if (!result) {
@@ -48,9 +59,7 @@ export default function RoomsList({ currentUser, roomers, loading, onNavigateCha
         return;
       }
 
-      // Step 2: Safety Checks
       if (result.uid === currentUser.uid) {
-        console.warn("[Add_Flow] User attempted to add themselves.");
         setSearchError("You cannot add yourself.");
         setIsProcessing(false);
         return;
@@ -58,17 +67,14 @@ export default function RoomsList({ currentUser, roomers, loading, onNavigateCha
 
       const alreadyInList = roomers.find(r => r.uid === result.uid);
       if (alreadyInList) {
-        console.warn("[Add_Flow] Target user is already in the contact list.");
         setSearchError("User is already in your rooms list.");
         setIsProcessing(false);
         return;
       }
 
-      // Step 3: Database write
       console.log(`[Add_Flow] Match confirmed: ${result.displayName} (${result.uid}). Recording request.`);
       await addRoomerToUser(currentUser.uid, result.uid);
       
-      // Step 4: UI Reset
       console.log("[Add_Flow] Roomer added successfully.");
       setShowAddModal(false);
       setSearchTerm('');
@@ -111,7 +117,7 @@ export default function RoomsList({ currentUser, roomers, loading, onNavigateCha
       </div>
 
       <div className="flex-1 overflow-y-auto no-scrollbar p-4 pb-20">
-        {loading ? (
+        {loading && roomers.length === 0 ? (
            <div className="flex justify-center mt-10 text-zinc-600 text-sm italic">Syncing...</div>
         ) : roomers.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-[60%] text-center px-6">

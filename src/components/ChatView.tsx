@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { ref, push, onValue, serverTimestamp, get, child, update, onDisconnect } from 'firebase/database';
+import { ref, push, onValue, serverTimestamp, get, child, update, onDisconnect, query, orderByChild, limitToLast, startAt, off } from 'firebase/database';
 import { db } from '../services/firebase';
 import { Message, UserProfile, Roomer } from '../types';
 
@@ -16,6 +16,7 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
   const [isVisible, setIsVisible] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const isFirstLoad = useRef(true);
   
   const isAccepted = recipient.status === 'accepted';
   const isPendingOutgoing = recipient.status === 'pending_outgoing';
@@ -34,73 +35,120 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
     const userRef = ref(db, `roomers/${currentUser.uid}`);
     
     const setStatus = (status: string | null) => {
-        console.log(`[Presence] Set activeRoom: ${status}`);
         update(userRef, { activeRoom: status }).catch(() => {});
     };
 
-    // 1. Initial Set
     setStatus(roomId);
-
-    // 2. onDisconnect (for abrupt closures like crash/network loss)
     const disconnectRef = onDisconnect(userRef);
     disconnectRef.update({ activeRoom: null });
 
-    // 3. Visibility Change (Backgrounding the app/switching tabs)
     const handleVisibility = () => {
-        if (document.visibilityState === 'hidden') {
-            console.log("[Presence] App backgrounded, clearing activeRoom.");
-            setStatus(null);
-        } else {
-            console.log("[Presence] App foregrounded, restoring activeRoom.");
-            setStatus(roomId);
-        }
+        if (document.visibilityState === 'hidden') setStatus(null);
+        else setStatus(roomId);
     };
 
-    // 4. Before Unload (Closing the tab/browser)
-    const handleUnload = () => {
-        setStatus(null);
-    };
+    const handleUnload = () => setStatus(null);
 
     document.addEventListener('visibilitychange', handleVisibility);
     window.addEventListener('beforeunload', handleUnload);
 
     return () => {
-      console.log("[Presence] Unmounting ChatView, clearing activeRoom.");
       document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('beforeunload', handleUnload);
-      disconnectRef.cancel(); // Prevent double trigger
+      disconnectRef.cancel();
       setStatus(null);
     };
   }, [roomId, currentUser.uid]);
 
   const handleBack = async () => {
-    console.log("[Action] Navigating back from chat.");
     setIsVisible(false);
-    // Explicit instant update before navigation
     await update(ref(db, `roomers/${currentUser.uid}`), { activeRoom: null });
     setTimeout(onBack, 300);
   };
 
+  // EFFICIENT DATA FETCHING: CACHE + DELTA UPDATES
   useEffect(() => {
-    const messagesRef = ref(db, `rooms/${roomId}/messages`);
-    const unsubscribe = onValue(messagesRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        const loadedMessages = Object.entries(data).map(([key, val]: [string, any]) => ({
-          id: key,
-          ...val
-        })).sort((a, b) => a.timestamp - b.timestamp);
-        setMessages(loadedMessages);
-      } else {
-        setMessages([]);
-      }
-    });
-    return () => unsubscribe();
+    const CACHE_KEY = `chat_cache_${roomId}`;
+    const messagesRef = ref(db, `messages/${roomId}`); // FLATTENED STRUCTURE
+    let unsubscribe: () => void;
+
+    const loadData = async () => {
+        // 1. Load from Cache first
+        let initialMessages: Message[] = [];
+        try {
+            const cachedStr = localStorage.getItem(CACHE_KEY);
+            if (cachedStr) {
+                initialMessages = JSON.parse(cachedStr);
+                setMessages(initialMessages);
+                console.log(`[DB_OPTIMIZATION] Loaded ${initialMessages.length} messages from Cache for room ${roomId}`);
+            }
+        } catch (e) {
+            console.error("[Cache_Error]", e);
+        }
+
+        // 2. Determine Query Strategy
+        let msgQuery;
+        
+        if (initialMessages.length > 0) {
+            // Delta Fetch: Only get messages NEWER than the last one we have
+            const lastMsg = initialMessages[initialMessages.length - 1];
+            // +1 to timestamp to avoid fetching the last message again
+            const startTimestamp = (lastMsg.timestamp || 0) + 1; 
+            console.log(`[DB_OPTIMIZATION] Delta Sync: Fetching messages after timestamp ${startTimestamp}`);
+            msgQuery = query(messagesRef, orderByChild('timestamp'), startAt(startTimestamp));
+        } else {
+            // First time load: Limit to last 25 to save bandwidth
+            console.log(`[DB_OPTIMIZATION] Fresh Load: Fetching last 25 messages from Network`);
+            msgQuery = query(messagesRef, orderByChild('timestamp'), limitToLast(25));
+        }
+
+        // 3. Set up Listener
+        unsubscribe = onValue(msgQuery, (snapshot) => {
+            const data = snapshot.val();
+            if (data) {
+                const newMessages = Object.entries(data).map(([key, val]: [string, any]) => ({
+                    id: key,
+                    ...val
+                })).sort((a, b) => a.timestamp - b.timestamp);
+
+                setMessages(prev => {
+                    // Merge logic: Filter out duplicates based on ID
+                    const existingIds = new Set(prev.map(m => m.id));
+                    const uniqueNew = newMessages.filter(m => !existingIds.has(m.id));
+                    
+                    if (uniqueNew.length === 0) return prev;
+
+                    console.log(`[DB_OPTIMIZATION] Network delivered ${uniqueNew.length} new messages.`);
+                    const merged = [...prev, ...uniqueNew].sort((a, b) => a.timestamp - b.timestamp);
+                    
+                    // Update Cache
+                    try {
+                        // Limit cache size to avoid localStorage limits (e.g. keep last 500)
+                        const toCache = merged.slice(-500); 
+                        localStorage.setItem(CACHE_KEY, JSON.stringify(toCache));
+                    } catch (e) { console.warn("Cache full"); }
+                    
+                    return merged;
+                });
+            }
+        });
+    };
+
+    loadData();
+
+    return () => {
+        if (unsubscribe) unsubscribe();
+        off(messagesRef);
+    };
   }, [roomId]);
 
+  // Scroll logic
   useEffect(() => {
     if (bottomRef.current) {
-        bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+        // Instant scroll on first load, smooth on new messages
+        const behavior = isFirstLoad.current ? 'instant' : 'smooth';
+        bottomRef.current.scrollIntoView({ behavior: behavior as ScrollBehavior });
+        isFirstLoad.current = false;
     }
   }, [messages]);
 
@@ -112,7 +160,8 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
     setInputText('');
     if (inputRef.current) inputRef.current.focus();
 
-    const messagesRef = ref(db, `rooms/${roomId}/messages`);
+    // FLATTENED WRITE: messages/$roomId instead of rooms/$roomId/messages
+    const messagesRef = ref(db, `messages/${roomId}`);
     await push(messagesRef, {
       senderId: currentUser.uid,
       senderName: currentUser.displayName || 'User',
@@ -120,6 +169,7 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
       timestamp: serverTimestamp()
     });
 
+    // Send Notification Trigger
     try {
         const snapshot = await get(child(ref(db), `roomers/${recipient.uid}`));
         if (snapshot.exists()) {
@@ -127,9 +177,7 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
             const targetToken = val.fcmToken;
             const recipientActiveRoom = val.activeRoom;
 
-            // Only notify if recipient is NOT in the room
             if (targetToken && recipientActiveRoom !== roomId) {
-                 console.log(`[Notification] Recipient ${recipient.uid} not in room. Sending notification.`);
                  const mySnapshot = await get(child(ref(db), `roomers/${currentUser.uid}`));
                  const myData = mySnapshot.exists() ? mySnapshot.val() : {};
                  const rawUsername = myData.username || '';
@@ -144,14 +192,13 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
                      roomId: roomId
                  };
 
-                 await fetch("https://script.google.com/macros/s/AKfycbyYT6o7oa_HYk_p1qCAaXJKqxdKdcTNw0G6b3SxEmHgxqjUVf7cFmQjmG6oLyZEP6VVLg/exec", {
+                 // Fire and forget - don't await the fetch to keep UI snappy
+                 fetch("https://script.google.com/macros/s/AKfycbyYT6o7oa_HYk_p1qCAaXJKqxdKdcTNw0G6b3SxEmHgxqjUVf7cFmQjmG6oLyZEP6VVLg/exec", {
                      method: "POST",
                      mode: "no-cors",
                      headers: { "Content-Type": "text/plain;charset=utf-8" },
                      body: JSON.stringify(payload)
-                 });
-            } else {
-                 console.log("[Notification] Recipient is currently in the room. Skipping push notification.");
+                 }).catch(e => console.warn("Notif failed", e));
             }
         }
     } catch (e) {}
