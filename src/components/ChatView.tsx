@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { ref, push, onValue, serverTimestamp, get, child, update, onDisconnect, query, orderByChild, limitToLast, startAt, off } from 'firebase/database';
+import { ref, push, onValue, serverTimestamp, get, child, update, onDisconnect, query, orderByChild, limitToLast, startAt, off, endBefore } from 'firebase/database';
 import { db } from '../services/firebase';
 import { Message, UserProfile, Roomer } from '../types';
 
@@ -14,9 +14,14 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isVisible, setIsVisible] = useState(false);
+  const [isLoadingOlder, setIsLoadingOlder] = useState(false);
+  const [allLoaded, setAllLoaded] = useState(false);
+  
   const bottomRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const isFirstLoad = useRef(true);
+  const previousScrollHeight = useRef(0);
   
   const isAccepted = recipient.status === 'accepted';
   const isPendingOutgoing = recipient.status === 'pending_outgoing';
@@ -31,12 +36,8 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
   // INSTANT PRESENCE SCHEME
   useEffect(() => {
     if (!currentUser.uid) return;
-
     const userRef = ref(db, `roomers/${currentUser.uid}`);
-    
-    const setStatus = (status: string | null) => {
-        update(userRef, { activeRoom: status }).catch(() => {});
-    };
+    const setStatus = (status: string | null) => { update(userRef, { activeRoom: status }).catch(() => {}); };
 
     setStatus(roomId);
     const disconnectRef = onDisconnect(userRef);
@@ -46,7 +47,6 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
         if (document.visibilityState === 'hidden') setStatus(null);
         else setStatus(roomId);
     };
-
     const handleUnload = () => setStatus(null);
 
     document.addEventListener('visibilitychange', handleVisibility);
@@ -66,44 +66,22 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
     setTimeout(onBack, 300);
   };
 
-  // EFFICIENT DATA FETCHING: CACHE + DELTA UPDATES
+  // INITIAL LOAD & REALTIME NEW MESSAGES
   useEffect(() => {
     const CACHE_KEY = `chat_cache_${roomId}`;
-    const messagesRef = ref(db, `messages/${roomId}`); // FLATTENED STRUCTURE
+    const messagesRef = ref(db, `messages/${roomId}`);
     let unsubscribe: () => void;
 
     const loadData = async () => {
-        // 1. Load from Cache first
-        let initialMessages: Message[] = [];
-        try {
-            const cachedStr = localStorage.getItem(CACHE_KEY);
-            if (cachedStr) {
-                initialMessages = JSON.parse(cachedStr);
-                setMessages(initialMessages);
-                console.log(`[DB_OPTIMIZATION] Loaded ${initialMessages.length} messages from Cache for room ${roomId}`);
-            }
-        } catch (e) {
-            console.error("[Cache_Error]", e);
-        }
-
-        // 2. Determine Query Strategy
-        let msgQuery;
+        // 1. Determine Fetch Strategy
+        // We load the last 25 initially
+        console.log(`[DB_OPTIMIZATION] Fresh Load: Fetching last 25 messages from Network`);
         
-        if (initialMessages.length > 0) {
-            // Delta Fetch: Only get messages NEWER than the last one we have
-            const lastMsg = initialMessages[initialMessages.length - 1];
-            // +1 to timestamp to avoid fetching the last message again
-            const startTimestamp = (lastMsg.timestamp || 0) + 1; 
-            console.log(`[DB_OPTIMIZATION] Delta Sync: Fetching messages after timestamp ${startTimestamp}`);
-            msgQuery = query(messagesRef, orderByChild('timestamp'), startAt(startTimestamp));
-        } else {
-            // First time load: Limit to last 25 to save bandwidth
-            console.log(`[DB_OPTIMIZATION] Fresh Load: Fetching last 25 messages from Network`);
-            msgQuery = query(messagesRef, orderByChild('timestamp'), limitToLast(25));
-        }
+        // Listen to updates. If we have cached messages, we could startAt(lastCache), 
+        // but for pagination simplicity, we'll start with limitToLast(25) and listen for additions.
+        const q = query(messagesRef, orderByChild('timestamp'), limitToLast(25));
 
-        // 3. Set up Listener
-        unsubscribe = onValue(msgQuery, (snapshot) => {
+        unsubscribe = onValue(q, (snapshot) => {
             const data = snapshot.val();
             if (data) {
                 const newMessages = Object.entries(data).map(([key, val]: [string, any]) => ({
@@ -112,23 +90,18 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
                 })).sort((a, b) => a.timestamp - b.timestamp);
 
                 setMessages(prev => {
-                    // Merge logic: Filter out duplicates based on ID
+                    // Merge logic: ensure we don't overwrite older messages loaded via pagination
+                    // We only want to update/append the 'tail' of the conversation or update existing IDs
+                    
                     const existingIds = new Set(prev.map(m => m.id));
                     const uniqueNew = newMessages.filter(m => !existingIds.has(m.id));
                     
+                    // If everything is duplicate, check for updates (like read receipts, though not implemented yet)
+                    // For now, simple merge
                     if (uniqueNew.length === 0) return prev;
-
-                    console.log(`[DB_OPTIMIZATION] Network delivered ${uniqueNew.length} new messages.`);
-                    const merged = [...prev, ...uniqueNew].sort((a, b) => a.timestamp - b.timestamp);
                     
-                    // Update Cache
-                    try {
-                        // Limit cache size to avoid localStorage limits (e.g. keep last 500)
-                        const toCache = merged.slice(-500); 
-                        localStorage.setItem(CACHE_KEY, JSON.stringify(toCache));
-                    } catch (e) { console.warn("Cache full"); }
-                    
-                    return merged;
+                    console.log(`[DB_OPTIMIZATION] Realtime update: ${uniqueNew.length} new messages.`);
+                    return [...prev, ...uniqueNew].sort((a, b) => a.timestamp - b.timestamp);
                 });
             }
         });
@@ -142,15 +115,83 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
     };
   }, [roomId]);
 
-  // Scroll logic
+  // PAGINATION: LOAD OLDER MESSAGES
+  const loadOlderMessages = async () => {
+      if (isLoadingOlder || allLoaded || messages.length === 0) return;
+      
+      setIsLoadingOlder(true);
+      const oldestMsg = messages[0];
+      console.log(`[Pagination] Loading older messages before: ${oldestMsg.timestamp}`);
+
+      try {
+          const messagesRef = ref(db, `messages/${roomId}`);
+          // Fetch 10 messages strictly BEFORE the current oldest one
+          const q = query(
+              messagesRef, 
+              orderByChild('timestamp'), 
+              endBefore(oldestMsg.timestamp), 
+              limitToLast(10)
+          );
+
+          const snapshot = await get(q);
+          if (snapshot.exists()) {
+              const data = snapshot.val();
+              const olderMessages = Object.entries(data).map(([key, val]: [string, any]) => ({
+                  id: key,
+                  ...val
+              })).sort((a, b) => a.timestamp - b.timestamp);
+
+              console.log(`[Pagination] Loaded ${olderMessages.length} older messages.`);
+
+              if (olderMessages.length < 10) {
+                  setAllLoaded(true);
+              }
+
+              // Capture scroll height before DOM update
+              if (containerRef.current) {
+                  previousScrollHeight.current = containerRef.current.scrollHeight;
+              }
+
+              setMessages(prev => [...olderMessages, ...prev]);
+          } else {
+              console.log(`[Pagination] No more older messages.`);
+              setAllLoaded(true);
+          }
+      } catch (e) {
+          console.error("[Pagination] Error:", e);
+      } finally {
+          setIsLoadingOlder(false);
+      }
+  };
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+      if (e.currentTarget.scrollTop === 0 && !isLoadingOlder && !allLoaded) {
+          loadOlderMessages();
+      }
+  };
+
+  // SCROLL POSITION MANAGEMENT
   useEffect(() => {
-    if (bottomRef.current) {
-        // Instant scroll on first load, smooth on new messages
-        const behavior = isFirstLoad.current ? 'instant' : 'smooth';
-        bottomRef.current.scrollIntoView({ behavior: behavior as ScrollBehavior });
+    // If it's first load, scroll to bottom
+    if (isFirstLoad.current && messages.length > 0) {
+        bottomRef.current?.scrollIntoView({ behavior: 'instant' });
         isFirstLoad.current = false;
+    } 
+    // If we just loaded OLDER messages, maintain relative scroll position
+    else if (previousScrollHeight.current > 0 && containerRef.current) {
+        const newScrollHeight = containerRef.current.scrollHeight;
+        const diff = newScrollHeight - previousScrollHeight.current;
+        containerRef.current.scrollTop = diff;
+        previousScrollHeight.current = 0; // Reset
     }
-  }, [messages]);
+    // If a NEW message arrived (at the bottom), scroll to it if user is near bottom
+    // (Simplification: always scroll to bottom on new message for now)
+    else if (!isLoadingOlder && bottomRef.current) {
+        // Only smooth scroll if we are not loading history
+        bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, isLoadingOlder]);
+
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -160,7 +201,6 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
     setInputText('');
     if (inputRef.current) inputRef.current.focus();
 
-    // FLATTENED WRITE: messages/$roomId instead of rooms/$roomId/messages
     const messagesRef = ref(db, `messages/${roomId}`);
     await push(messagesRef, {
       senderId: currentUser.uid,
@@ -169,7 +209,7 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
       timestamp: serverTimestamp()
     });
 
-    // Send Notification Trigger
+    // VERCEL NOTIFICATION API
     try {
         const snapshot = await get(child(ref(db), `roomers/${recipient.uid}`));
         if (snapshot.exists()) {
@@ -182,26 +222,34 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
                  const myData = mySnapshot.exists() ? mySnapshot.val() : {};
                  const rawUsername = myData.username || '';
                  const cleanUsername = rawUsername.startsWith('$') ? rawUsername.substring(1) : rawUsername;
+                 const displayName = myData.displayName || currentUser.displayName || 'Rooms User';
 
-                 const payload = {
-                     targetToken: targetToken,
-                     senderUsername: cleanUsername,
-                     senderDisplayName: myData.displayName || currentUser.displayName || 'Rooms User',
-                     senderEmail: myData.email || currentUser.email || '',
-                     messageText: text,
-                     roomId: roomId
-                 };
+                 console.log(`[Notification] Sending via Vercel API to ${targetToken.substring(0, 10)}...`);
 
-                 // Fire and forget - don't await the fetch to keep UI snappy
-                 fetch("https://script.google.com/macros/s/AKfycbyYT6o7oa_HYk_p1qCAaXJKqxdKdcTNw0G6b3SxEmHgxqjUVf7cFmQjmG6oLyZEP6VVLg/exec", {
-                     method: "POST",
-                     mode: "no-cors",
-                     headers: { "Content-Type": "text/plain;charset=utf-8" },
-                     body: JSON.stringify(payload)
-                 }).catch(e => console.warn("Notif failed", e));
+                 fetch('/api/notify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        token: targetToken,
+                        title: `New Message from ${displayName}`,
+                        body: text,
+                        data: {
+                            roomId: roomId,
+                            senderId: currentUser.uid
+                        }
+                    })
+                 })
+                 .then(res => res.json())
+                 .then(data => console.log("[Notification] Vercel Response:", data))
+                 .catch(e => console.error("[Notification] Vercel Error:", e));
+
+            } else {
+                 console.log("[Notification] Recipient active in room. Skipped.");
             }
         }
-    } catch (e) {}
+    } catch (e: any) {
+        console.error("[Notification] Logic failed", e.message);
+    }
   };
 
   const formatMessageWithLinks = (text: string) => {
@@ -239,7 +287,17 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
         <div className="col-span-1" />
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar bg-background w-full">
+      <div 
+        ref={containerRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar bg-background w-full"
+      >
+        {isLoadingOlder && (
+            <div className="flex justify-center py-2">
+                <div className="w-5 h-5 border-2 border-zinc-700 border-t-white rounded-full animate-spin"></div>
+            </div>
+        )}
+        
         {messages.map((msg) => {
           const isMe = msg.senderId === currentUser.uid;
           return (
