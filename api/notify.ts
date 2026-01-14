@@ -38,11 +38,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Missing token, title, or body' });
     }
 
+    // Add rocket emoji for verification
+    const finalBody = `🚀 ${body}`;
+
     const message = {
       token: token,
       notification: {
         title: title,
-        body: body,
+        body: finalBody,
       },
       // Optional data payload
       data: data || {},
@@ -65,11 +68,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     };
 
+    console.log(`[API] Sending notification to ${token.slice(0, 10)}...`);
     const response = await admin.messaging().send(message);
+    console.log(`[API] Successfully sent message: ${response}`);
     
     return res.status(200).json({ success: true, messageId: response });
   } catch (error: any) {
-    console.error('FCM Send Error:', error);
+    console.error('[API] FCM Send Error:', error);
     return res.status(500).json({ error: error.message || 'Internal Server Error' });
   }
 }
