@@ -24,7 +24,7 @@ export const VAPID_KEY = "YOUR_VAPID_KEY_HERE";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: typeof window !== 'undefined' ? window.location.hostname : "afterchat.firebaseapp.com",
+  authDomain: "afterchat.vercel.app",
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,

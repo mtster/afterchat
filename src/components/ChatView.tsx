@@ -144,6 +144,11 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
                     return [...prev, ...uniqueNew].sort((a, b) => a.timestamp - b.timestamp);
                 });
             }
+        }, (error) => {
+             console.error(`[DB_Network_Error] Code: ${error.code}, Message: ${error.message}`);
+             if (error.code === 'PERMISSION_DENIED') {
+                 console.error("[DB_Network_Error] Permission Denied. Check your Firebase Rules for 'messages' node.");
+             }
         });
         
         isInitialMount.current = false;
