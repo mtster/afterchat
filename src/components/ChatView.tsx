@@ -3,6 +3,7 @@ import { ref, push, onValue, serverTimestamp, get, child, update, onDisconnect, 
 import { db } from '../services/firebase';
 import { getCachedMessages, saveMessageToCache, saveBatchMessages } from '../services/indexedDB';
 import { Message, UserProfile, Roomer } from '../types';
+import { Copy, Check } from 'lucide-react';
 
 interface ChatViewProps {
   roomId: string;
@@ -24,6 +25,11 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const [allLoaded, setAllLoaded] = useState(false);
   
+  // Long Press & Copy State
+  const [activeMessageId, setActiveMessageId] = useState<string | null>(null);
+  const [showCopiedToast, setShowCopiedToast] = useState(false);
+  const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -52,28 +58,15 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
     };
 
     setStatus(roomId);
-    
-    // 1. Server-side Disconnect (Crash/Socket Close)
     const disconnectRef = onDisconnect(userRef);
     disconnectRef.update({ activeRoom: null });
 
-    // 2. Client-side Visibility (Tab Switch)
     const handleVisibility = () => {
-        if (document.visibilityState === 'hidden') {
-            setStatus(null);
-        } else {
-            setStatus(roomId);
-        }
+        if (document.visibilityState === 'hidden') setStatus(null);
+        else setStatus(roomId);
     };
 
-    // 3. Client-side Unload/Background (iOS swipe away)
-    // 'pagehide' is more reliable than 'unload' on iOS
-    const handlePageHide = () => {
-        // We try to send a final update. 
-        // Note: Realtime Database SDK might not flush this in time if socket closes instantly,
-        // but it is the best client-side attempt we can make without sendBeacon + REST API Auth complexity.
-        setStatus(null);
-    };
+    const handlePageHide = () => setStatus(null);
 
     document.addEventListener('visibilitychange', handleVisibility);
     window.addEventListener('pagehide', handlePageHide);
@@ -92,29 +85,23 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
     setTimeout(onBack, 300);
   };
 
-  // HYBRID DATA LOADING: INDEXEDDB + NETWORK
+  // HYBRID DATA LOADING
   useEffect(() => {
     let unsubscribe: () => void;
     const messagesRef = ref(db, `messages/${roomId}`);
 
     const initData = async () => {
-        console.log("[Data] Checking IndexedDB...");
         const cached = await getCachedMessages(roomId);
-        
         let startTimestamp = 0;
 
         if (cached.length > 0) {
-            console.log(`[Data] Loaded ${cached.length} messages from cache.`);
             setMessages(cached);
             startTimestamp = cached[cached.length - 1].timestamp + 1;
-            
             if (isInitialMount.current && containerRef.current) {
                 setTimeout(() => {
                     if (containerRef.current) containerRef.current.scrollTop = containerRef.current.scrollHeight;
                 }, 0);
             }
-        } else {
-             console.log("[Data] No cache found. Doing full fresh load.");
         }
 
         let q;
@@ -137,29 +124,16 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
                 setMessages(prev => {
                     const existingIds = new Set(prev.map(m => m.id));
                     const uniqueNew = newMessages.filter(m => !existingIds.has(m.id));
-                    
                     if (uniqueNew.length === 0) return prev;
-                    
-                    console.log(`[Data] Received ${uniqueNew.length} new messages from network.`);
                     return [...prev, ...uniqueNew].sort((a, b) => a.timestamp - b.timestamp);
                 });
             }
-        }, (error: any) => {
-             console.error(`[DB_Network_Error] Code: ${error.code}, Message: ${error.message}`);
-             if (error.code === 'PERMISSION_DENIED') {
-                 console.error("[DB_Network_Error] Permission Denied. Check your Firebase Rules for 'messages' node.");
-             }
         });
-        
         isInitialMount.current = false;
     };
 
     initData();
-
-    return () => {
-        if (unsubscribe) unsubscribe();
-        off(messagesRef);
-    };
+    return () => { if (unsubscribe) unsubscribe(); off(messagesRef); };
   }, [roomId]);
 
   const loadOlderMessages = async () => {
@@ -168,39 +142,19 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
           setPullOffset(0);
           return;
       }
-
       const oldestMsg = messages[0];
-      console.log(`[Pagination] Fetching older than ${oldestMsg.timestamp}`);
-
       try {
           const messagesRef = ref(db, `messages/${roomId}`);
-          const q = query(
-              messagesRef, 
-              orderByChild('timestamp'), 
-              endBefore(oldestMsg.timestamp), 
-              limitToLast(10)
-          );
-
+          const q = query(messagesRef, orderByChild('timestamp'), endBefore(oldestMsg.timestamp), limitToLast(10));
           const snapshot = await get(q);
           if (snapshot.exists()) {
               const data = snapshot.val();
-              const olderMessages = Object.entries(data).map(([key, val]: [string, any]) => ({
-                  id: key,
-                  ...val
-              })).sort((a, b) => a.timestamp - b.timestamp);
-
-              console.log(`[Pagination] Retrieved ${olderMessages.length} older messages.`);
-
+              const olderMessages = Object.entries(data).map(([key, val]: [string, any]) => ({ id: key, ...val })).sort((a, b) => a.timestamp - b.timestamp);
               if (olderMessages.length < 10) setAllLoaded(true);
-
-              if (containerRef.current) {
-                  previousScrollHeight.current = containerRef.current.scrollHeight;
-              }
-
+              if (containerRef.current) previousScrollHeight.current = containerRef.current.scrollHeight;
               saveBatchMessages(roomId, olderMessages);
               setMessages(prev => [...olderMessages, ...prev]);
           } else {
-              console.log("[Pagination] No more history.");
               setAllLoaded(true);
           }
       } catch (e) {
@@ -211,7 +165,8 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
       }
   };
 
-  const handleTouchStart = (e: React.TouchEvent) => {
+  // TOUCH & SCROLL HANDLERS (Pull to Refresh)
+  const handleTouchStartScroll = (e: React.TouchEvent) => {
       if (!containerRef.current) return;
       if (containerRef.current.scrollTop <= 0) {
           touchStartY.current = e.touches[0].clientY;
@@ -221,7 +176,7 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
       }
   };
 
-  const handleTouchMove = (e: React.TouchEvent) => {
+  const handleTouchMoveScroll = (e: React.TouchEvent) => {
       if (!isPulling || !containerRef.current) return;
       const currentY = e.touches[0].clientY;
       const diff = currentY - touchStartY.current;
@@ -234,7 +189,7 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
       }
   };
 
-  const handleTouchEnd = () => {
+  const handleTouchEndScroll = () => {
       if (!isPulling) return;
       setIsPulling(false);
       if (pullOffset > PULL_THRESHOLD) {
@@ -258,17 +213,31 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
     }
   }, [messages, isLoadingOlder, pullOffset]);
 
-  const handlePaste = async () => {
-    try {
-        const text = await navigator.clipboard.readText();
-        if (text) {
-            setInputText(prev => prev + text);
-            if (inputRef.current) inputRef.current.focus();
-        }
-    } catch (err) {
-        console.error('Clipboard read failed', err);
-        alert("Clipboard access denied or empty. Please paste manually.");
+  // --- LONG PRESS LOGIC ---
+  const handlePressStart = (id: string) => {
+    // Clear any existing timer or state
+    if (pressTimer.current) clearTimeout(pressTimer.current);
+    setActiveMessageId(null);
+    
+    pressTimer.current = setTimeout(() => {
+        setActiveMessageId(id);
+        if (navigator.vibrate) navigator.vibrate(10); // Haptic feedback
+    }, 500);
+  };
+
+  const handlePressEnd = () => {
+    if (pressTimer.current) {
+        clearTimeout(pressTimer.current);
+        pressTimer.current = null;
     }
+  };
+
+  const handleCopyMessage = (text: string) => {
+      navigator.clipboard.writeText(text).then(() => {
+          setActiveMessageId(null);
+          setShowCopiedToast(true);
+          setTimeout(() => setShowCopiedToast(false), 2000);
+      });
   };
 
   const handleSend = async (e: React.FormEvent) => {
@@ -293,72 +262,32 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
         saveMessageToCache(roomId, { id: newRef.key, ...newMessage, timestamp: Date.now() });
     }
 
+    // Fire & Forget Notification
     try {
-        console.log(`[Notify] Checking recipient details for: ${recipient.uid}`);
-        const snapshot = await get(child(ref(db), `roomers/${recipient.uid}`));
-        if (snapshot.exists()) {
-            const val = snapshot.val();
-            const targetToken = val.fcmToken;
-            const recipientActiveRoom = val.activeRoom;
-            
-            // Stale Detection
-            const lastSeen = val.lastOnline || 0;
-            const timeDiff = Date.now() - lastSeen;
-            const isStale = timeDiff > 30000; // 30 seconds
-            
-            console.log(`[Notify] Recipient Active Room: ${recipientActiveRoom}`);
-            console.log(`[Notify] Recipient Last Online: ${Math.round(timeDiff/1000)}s ago (Stale: ${isStale})`);
-            console.log(`[Notify] Target Token: ${targetToken ? 'Present' : 'MISSING'}`);
+        get(child(ref(db), `roomers/${recipient.uid}`)).then(snapshot => {
+            if (snapshot.exists()) {
+                const val = snapshot.val();
+                const targetToken = val.fcmToken;
+                const recipientActiveRoom = val.activeRoom;
+                const lastSeen = val.lastOnline || 0;
+                const isStale = (Date.now() - lastSeen) > 30000;
 
-            // NOTIFY IF: (Token Exists) AND ( (Not in room) OR (In room but Stale) )
-            if (targetToken && (recipientActiveRoom !== roomId || isStale)) {
-                 const mySnapshot = await get(child(ref(db), `roomers/${currentUser.uid}`));
-                 const myData = mySnapshot.exists() ? mySnapshot.val() : {};
-                 const displayName = myData.displayName || currentUser.displayName || 'Rooms User';
-                 
-                 // USE RELATIVE PATH to avoid CORS on preview deployments
-                 const endpoint = '/api/notify';
-
-                 console.log(`[Notify] TRIGGERING Notification via ${endpoint}...`);
-
-                 fetch(endpoint, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        token: targetToken,
-                        title: `New Message from ${displayName}`,
-                        body: text,
-                        data: { roomId: roomId, senderId: currentUser.uid }
-                    })
-                 })
-                 .then(async res => {
-                     console.log(`[Notify] Fetch Response Status: ${res.status}`);
-                     if (!res.ok) {
-                         const errText = await res.text();
-                         console.error(`[Notify] HTTP Error: ${errText}`);
-                         return;
-                     }
-                     const data = await res.json();
-                     console.log("[Notify] SUCCESS:", data);
-                 })
-                 .catch(error => {
-                     console.error("[Notify] Fetch FAILED");
-                     const errObj = Object.getOwnPropertyNames(error).reduce((acc, key) => {
-                        acc[key] = (error as any)[key];
-                        return acc;
-                     }, {} as any);
-                     console.error(`[Notify] Details:`, JSON.stringify(errObj));
-                 });
-
-            } else {
-                 console.log("[Notify] Skipped: Recipient is active in room and not stale.");
+                if (targetToken && (recipientActiveRoom !== roomId || isStale)) {
+                     const myName = currentUser.displayName || 'Rooms User';
+                     fetch('/api/notify', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            token: targetToken,
+                            title: `New Message from ${myName}`,
+                            body: text,
+                            data: { roomId: roomId, senderId: currentUser.uid }
+                        })
+                     }).catch(err => console.error("Notify fail:", err));
+                }
             }
-        } else {
-            console.warn("[Notify] Recipient profile not found in DB.");
-        }
-    } catch (e: any) {
-        console.error("[Notify] Logic failed", e.message);
-    }
+        });
+    } catch (e) {}
   };
 
   const formatMessageWithLinks = (text: string) => {
@@ -377,8 +306,14 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
   return (
     <div className={`flex flex-col h-[100dvh] w-screen bg-background fixed inset-0 z-20 transition-transform duration-300 ease-in-out ${isVisible ? 'translate-x-0' : 'translate-x-full'}`}>
       
+      {/* Copied Toast */}
+      <div className={`fixed top-20 left-1/2 transform -translate-x-1/2 bg-zinc-800 text-white px-4 py-2 rounded-full shadow-xl z-50 flex items-center gap-2 transition-opacity duration-300 pointer-events-none border border-zinc-700 ${showCopiedToast ? 'opacity-100' : 'opacity-0'}`}>
+         <Check size={14} className="text-green-400" />
+         <span className="text-xs font-medium">Copied to clipboard</span>
+      </div>
+
       {/* Header */}
-      <div className="flex-none grid grid-cols-6 items-center px-4 py-3 border-b border-border bg-background/90 backdrop-blur-md sticky top-0 z-50" style={{ paddingTop: 'max(16px, env(safe-area-inset-top))' }}>
+      <div className="flex-none grid grid-cols-6 items-center px-4 py-3 border-b border-border bg-background/90 backdrop-blur-md sticky top-0 z-40" style={{ paddingTop: 'max(16px, env(safe-area-inset-top))' }}>
         <button onClick={handleBack} className="col-span-1 justify-self-start text-white p-2 -ml-2 active:opacity-50">
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
         </button>
@@ -388,14 +323,14 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
         <div className="col-span-1" />
       </div>
 
-      {/* Chat Container with Touch Listeners */}
+      {/* Chat Container */}
       <div 
         ref={containerRef}
         className="flex-1 overflow-y-auto no-scrollbar bg-background w-full relative"
         style={{ overflowAnchor: 'auto', touchAction: 'pan-y' }}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
+        onTouchStart={handleTouchStartScroll}
+        onTouchMove={handleTouchMoveScroll}
+        onTouchEnd={handleTouchEndScroll}
       >
         <div 
             style={{ 
@@ -409,23 +344,55 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
                 {isLoadingOlder ? (
                     <div className="w-5 h-5 border-2 border-zinc-600 border-t-white rounded-full animate-spin"></div>
                 ) : (
-                    <>
-                        <svg className={`w-5 h-5 text-zinc-500 transition-transform duration-200 ${pullOffset > PULL_THRESHOLD ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" /></svg>
-                        <span className="text-[10px] uppercase tracking-widest text-zinc-600 font-bold">
-                            {pullOffset > PULL_THRESHOLD ? 'Release to Load' : 'Pull for History'}
-                        </span>
-                    </>
+                    <span className="text-[10px] uppercase tracking-widest text-zinc-600 font-bold">{pullOffset > PULL_THRESHOLD ? 'Release' : 'History'}</span>
                 )}
             </div>
         </div>
 
-        <div className="p-4 space-y-4 min-h-[101%]"> 
+        <div className="p-4 space-y-4 min-h-[101%]" onClick={() => setActiveMessageId(null)}> 
             {messages.map((msg) => {
               const isMe = msg.senderId === currentUser.uid;
+              const isActive = activeMessageId === msg.id;
+
               return (
-                <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[75%] px-4 py-2 rounded-2xl text-[15px] leading-snug break-words ${isMe ? 'bg-blue-600 text-white rounded-tr-sm' : 'bg-zinc-800 text-zinc-100 rounded-tl-sm'}`}>
-                    {formatMessageWithLinks(msg.text)}
+                <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'} relative group`}>
+                   
+                  {/* Message Bubble Wrapper with Events */}
+                  <div 
+                    className="relative"
+                    onTouchStart={() => handlePressStart(msg.id)}
+                    onTouchEnd={handlePressEnd}
+                    onTouchMove={handlePressEnd}
+                    onMouseDown={() => handlePressStart(msg.id)} // Desktop fallback
+                    onMouseUp={handlePressEnd}
+                    onMouseLeave={handlePressEnd}
+                    style={{ WebkitTouchCallout: 'none' }}
+                  >
+                     {/* Copy Menu Popover */}
+                     {isActive && (
+                        <div className={`absolute z-50 ${isMe ? 'right-0' : 'left-0'} -top-12 animate-in fade-in slide-in-from-bottom-2 duration-200`}>
+                            <button 
+                                onClick={(e) => { e.stopPropagation(); handleCopyMessage(msg.text); }}
+                                className="flex items-center gap-2 bg-zinc-800 text-white px-3 py-2 rounded-xl shadow-2xl border border-zinc-700 active:bg-zinc-700 whitespace-nowrap"
+                            >
+                                <Copy size={14} />
+                                <span className="text-xs font-medium">Copy</span>
+                            </button>
+                            {/* Little triangle arrow */}
+                            <div className={`absolute bottom-[-5px] w-3 h-3 bg-zinc-800 border-r border-b border-zinc-700 transform rotate-45 ${isMe ? 'right-4' : 'left-4'}`}></div>
+                        </div>
+                     )}
+
+                     {/* The Message Bubble */}
+                     <div 
+                        className={`
+                            max-w-[75vw] px-4 py-2 rounded-2xl text-[15px] leading-snug break-words transition-transform duration-200
+                            ${isMe ? 'bg-blue-600 text-white rounded-tr-sm' : 'bg-zinc-800 text-zinc-100 rounded-tl-sm'}
+                            ${isActive ? 'scale-105' : 'scale-100'}
+                        `}
+                     >
+                        {formatMessageWithLinks(msg.text)}
+                     </div>
                   </div>
                 </div>
               );
@@ -444,18 +411,19 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
             </div>
         ) : (
             <form onSubmit={handleSend} className="flex gap-2 items-center">
-             <button 
-                type="button" 
-                onClick={handlePaste}
-                className="w-10 h-10 rounded-full flex items-center justify-center transition-all flex-shrink-0 bg-zinc-800 text-zinc-400 hover:text-white active:scale-95"
-                title="Paste from Clipboard"
-             >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
-            </button>
-            <input ref={inputRef} type="text" value={inputText} onChange={(e) => setInputText(e.target.value)} placeholder="Message" className="flex-1 bg-black border border-zinc-700 rounded-full px-4 py-2 text-white placeholder-zinc-500 focus:outline-none focus:border-blue-500 transition-colors" autoComplete="off" enterKeyHint="send" />
-            <button type="submit" disabled={!inputText.trim()} className={`w-10 h-10 rounded-full flex items-center justify-center transition-all flex-shrink-0 ${inputText.trim() ? 'bg-blue-600 text-white active:scale-95' : 'bg-zinc-800 text-zinc-500'}`}>
-                <svg className="w-5 h-5 ml-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M12 5l7 7-7 7" /></svg>
-            </button>
+                <input 
+                    ref={inputRef} 
+                    type="text" 
+                    value={inputText} 
+                    onChange={(e) => setInputText(e.target.value)} 
+                    placeholder="Message" 
+                    className="flex-1 bg-black border border-zinc-700 rounded-full px-4 py-2 text-white placeholder-zinc-500 focus:outline-none focus:border-blue-500 transition-colors" 
+                    autoComplete="off" 
+                    enterKeyHint="send" 
+                />
+                <button type="submit" disabled={!inputText.trim()} className={`w-10 h-10 rounded-full flex items-center justify-center transition-all flex-shrink-0 ${inputText.trim() ? 'bg-blue-600 text-white active:scale-95' : 'bg-zinc-800 text-zinc-500'}`}>
+                    <svg className="w-5 h-5 ml-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M12 5l7 7-7 7" /></svg>
+                </button>
             </form>
         )}
       </div>
