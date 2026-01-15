@@ -97,11 +97,6 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
         if (cached.length > 0) {
             setMessages(cached);
             startTimestamp = cached[cached.length - 1].timestamp + 1;
-            if (isInitialMount.current && containerRef.current) {
-                setTimeout(() => {
-                    if (containerRef.current) containerRef.current.scrollTop = containerRef.current.scrollHeight;
-                }, 0);
-            }
         }
 
         let q;
@@ -129,7 +124,7 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
                 });
             }
         });
-        isInitialMount.current = false;
+        // Note: isInitialMount reset is handled in the effect below to ensure scroll happens first
     };
 
     initData();
@@ -200,6 +195,28 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
           setPullOffset(0);
       }
   };
+
+  // SCROLL MANAGEMENT EFFECT
+  useEffect(() => {
+    // 1. Maintain Scroll Position after loading older messages
+    if (previousScrollHeight.current > 0 && containerRef.current) {
+        const newScrollHeight = containerRef.current.scrollHeight;
+        const diff = newScrollHeight - previousScrollHeight.current;
+        containerRef.current.scrollTop = diff;
+        previousScrollHeight.current = 0;
+    } 
+    // 2. Initial Load: FORCE SCROLL TO BOTTOM
+    else if (isInitialMount.current && messages.length > 0 && containerRef.current) {
+        console.log(`[ChatView] Initial Load (${messages.length} msgs). Scrolling to bottom.`);
+        containerRef.current.scrollTop = containerRef.current.scrollHeight;
+        isInitialMount.current = false;
+    }
+    // 3. New Message Incoming: Auto-scroll if close to bottom or previously at bottom
+    else if (!isLoadingOlder && bottomRef.current && !isInitialMount.current && pullOffset === 0) {
+        // We can add logic here to only scroll if user was at bottom, but for now we auto-scroll on new message
+        bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, isLoadingOlder, pullOffset]);
 
   // --- SIMPLE COPY LOGIC ---
   const handleCopyMessage = async (text: string) => {
@@ -278,7 +295,10 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
 
             console.log(`[Notify] Stale: ${isStale}, DiffRoom: ${isDifferentRoom}, ShouldSend: ${shouldSend}`);
             console.log(`[Notify_XRAY] SW Controller:`, navigator.serviceWorker?.controller);
-            console.log(`[Notify_XRAY] Permission:`, Notification.permission);
+            
+            // Safe Permission Check
+            const perm = (typeof window !== 'undefined' && 'Notification' in window) ? Notification.permission : 'unknown';
+            console.log(`[Notify_XRAY] Permission:`, perm);
 
             if (targetToken && shouldSend) {
                  const myName = currentUser.displayName || 'Rooms User';

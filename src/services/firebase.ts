@@ -55,8 +55,11 @@ export const messaging = async () => {
 export const requestAndStoreToken = async (uid: string) => {
   console.log(`[FCM_XRAY] Starting token sync for User: ${uid}`);
   try {
-    if (typeof window === 'undefined' || !('Notification' in window)) {
-        console.warn("[FCM_XRAY] Notifications API not available.");
+    // Safety Check for Notification API
+    const hasNotification = typeof window !== 'undefined' && 'Notification' in window;
+    
+    if (!hasNotification) {
+        console.warn("[FCM_XRAY] Notification API not available in this environment.");
         return;
     }
 
@@ -66,11 +69,14 @@ export const requestAndStoreToken = async (uid: string) => {
         return;
     }
 
-    let permission = Notification.permission;
+    // Safe permission check
+    // @ts-ignore
+    let permission = (typeof window !== 'undefined' && window.Notification) ? Notification.permission : 'default';
     console.log(`[FCM_XRAY] Current permission state: ${permission}`);
 
     if (permission === 'default') {
         console.log("[FCM_XRAY] Requesting permission...");
+        // @ts-ignore
         permission = await Notification.requestPermission();
         console.log(`[FCM_XRAY] Permission request result: ${permission}`);
     }

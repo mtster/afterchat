@@ -100,9 +100,15 @@ export default function App() {
         const roomId = payload.data?.roomId || "";
         const isChattingWithSender = currentView.name === 'CHAT' && currentView.roomId === roomId;
         
-        if (!isChattingWithSender && Notification.permission === 'granted') {
+        // Safety check for Notification API
+        const hasNotification = typeof window !== 'undefined' && 'Notification' in window;
+        // @ts-ignore
+        const permission = hasNotification ? Notification.permission : 'default';
+
+        if (!isChattingWithSender && permission === 'granted') {
             const title = payload.notification?.title || payload.data?.title || "New Message";
             const body = payload.notification?.body || payload.data?.body || "";
+            // @ts-ignore
             new Notification(title, { body, icon: '/icon-192.png' });
         }
     });
