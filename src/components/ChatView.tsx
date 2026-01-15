@@ -339,19 +339,30 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
             console.log(`- Recipient Last Seen: ${Math.floor(timeDiff/1000)}s ago (Stale: ${isStale})`);
             console.log(`- Token Available: ${!!targetToken}`);
 
-            if (targetToken && (recipientActiveRoom !== roomId || isStale)) {
-                 console.log(`[Notify] Sending API Request to /api/notify...`);
+            // Logic: Send if user is active in DIFFERENT room OR is in current room but Stale.
+            // Simplified: If (ActiveRoom != roomId) -> They are elsewhere.
+            // If (ActiveRoom == roomId) but Stale -> They are here but backgrounded.
+            
+            const isDifferentRoom = recipientActiveRoom !== roomId;
+            const shouldSend = isDifferentRoom || isStale;
+
+            if (targetToken && shouldSend) {
+                 console.log(`[Notify] Triggering Notification (Reason: ${isStale ? 'Stale' : 'Different Room'})`);
                  const myName = currentUser.displayName || 'Rooms User';
                  
+                 const payload = {
+                    token: targetToken,
+                    title: `New Message from ${myName}`,
+                    body: text,
+                    data: { roomId: roomId, senderId: currentUser.uid }
+                 };
+                 
+                 console.log("[Notify_XRAY] Sending Payload:", JSON.stringify(payload, null, 2));
+
                  fetch('/api/notify', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        token: targetToken,
-                        title: `New Message from ${myName}`,
-                        body: text,
-                        data: { roomId: roomId, senderId: currentUser.uid }
-                    })
+                    body: JSON.stringify(payload)
                  })
                  .then(async (res) => {
                      const txt = await res.text();
@@ -359,7 +370,7 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
                  })
                  .catch(err => console.error("[Notify] Fetch failed:", err));
             } else {
-                console.log(`[Notify] Skipped: User is active in this room.`);
+                console.log(`[Notify] Skipped: User is active and online in this room.`);
             }
         } else {
             console.warn(`[Notify] Recipient profile missing.`);

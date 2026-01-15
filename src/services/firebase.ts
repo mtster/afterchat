@@ -32,6 +32,7 @@ const firebaseConfig = {
   databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL
 };
 
+console.log("[Firebase_XRAY] Initializing App...");
 export const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
 export const db = getDatabase(app);
@@ -52,41 +53,42 @@ export const messaging = async () => {
 };
 
 export const requestAndStoreToken = async (uid: string) => {
-  console.log(`[FCM_Setup] Starting token sync for User: ${uid}`);
+  console.log(`[FCM_XRAY] Starting token sync for User: ${uid}`);
   try {
     if (typeof window === 'undefined' || !('Notification' in window)) {
-        console.warn("[FCM_Setup] Notifications API not available in this window context.");
+        console.warn("[FCM_XRAY] Notifications API not available.");
         return;
     }
 
     const msg = await messaging();
     if (!msg) {
-        console.warn("[FCM_Setup] Messaging instance failed to initialize.");
+        console.warn("[FCM_XRAY] Messaging instance failed to initialize.");
         return;
     }
 
     let permission = Notification.permission;
-    console.log(`[FCM_Setup] Current permission state: ${permission}`);
+    console.log(`[FCM_XRAY] Current permission state: ${permission}`);
 
     if (permission === 'default') {
-        console.log("[FCM_Setup] Requesting permission...");
+        console.log("[FCM_XRAY] Requesting permission...");
         permission = await Notification.requestPermission();
-        console.log(`[FCM_Setup] Permission request result: ${permission}`);
+        console.log(`[FCM_XRAY] Permission request result: ${permission}`);
     }
 
     if (permission === 'granted') {
         // CRITICAL UPDATE: Wait for Service Worker to be ready
-        console.log("[FCM_Setup] Permission granted. Waiting for Service Worker ready state...");
+        console.log("[FCM_XRAY] Permission granted. Waiting for Service Worker ready state...");
         
         if (!('serviceWorker' in navigator)) {
-             console.error("[FCM_Setup] Service Workers are not supported in this browser.");
+             console.error("[FCM_XRAY] Service Workers are not supported in this browser.");
              return;
         }
 
+        // Wait for the service worker registration to be ready
         const registration = await navigator.serviceWorker.ready;
-        console.log("[FCM_Setup] Service Worker is ready:", registration.scope);
+        console.log("[FCM_XRAY] Service Worker is ready:", registration.scope);
 
-        console.log(`[FCM_Setup] Fetching token with VAPID Key: ${VAPID_KEY.substring(0, 10)}...`);
+        console.log(`[FCM_XRAY] Fetching token with VAPID Key: ${VAPID_KEY.substring(0, 5)}...`);
         
         try {
             // Pass the registration to getToken to ensure it uses the correct SW
@@ -96,23 +98,20 @@ export const requestAndStoreToken = async (uid: string) => {
             });
 
             if (token) {
-                console.log(`[FCM_Setup] Token obtained: ${token.substring(0, 15)}...`);
+                console.log(`[FCM_XRAY] Token obtained: ${token.substring(0, 10)}...`);
                 await update(ref(db, `roomers/${uid}`), { fcmToken: token });
-                console.log("[FCM_Setup] Token successfully saved to Realtime Database.");
+                console.log("[FCM_XRAY] Token successfully saved to Realtime Database.");
             } else {
-                console.warn("[FCM_Setup] No token generated - check VAPID key and PWA status. Token is null.");
+                console.warn("[FCM_XRAY] No token generated - check VAPID key and PWA status. Token is null.");
             }
         } catch (tokenErr: any) {
-            console.error("[FCM_Setup] getToken failed:", tokenErr);
-            if (tokenErr.message.includes("no active Service Worker")) {
-                console.warn("[FCM_Setup] Tip: Ensure firebase-messaging-sw.js is in /public and registered correctly in index.tsx.");
-            }
+            console.error("[FCM_XRAY] getToken failed:", tokenErr);
         }
     } else {
-        console.warn(`[FCM_Setup] Permission denied or dismissed (${permission}).`);
+        console.warn(`[FCM_XRAY] Permission denied or dismissed (${permission}).`);
     }
   } catch (e: any) {
-      console.error("[FCM_Setup] Fatal Error during token request:", e);
+      console.error("[FCM_XRAY] Fatal Error during token request:", e);
   }
 };
 
@@ -121,7 +120,7 @@ export const setupNotifications = (uid: string) => requestAndStoreToken(uid);
 export const onMessageListener = async (callback: (payload: MessagePayload) => void) => {
   const msg = await messaging();
   if (msg) onMessage(msg, (payload) => {
-    console.log("[FCM_Foreground] Message received:", payload);
+    console.log("[FCM_Foreground_XRAY] Message received:", payload);
     callback(payload);
   });
 };
@@ -172,7 +171,6 @@ export const findUserByEmailOrUsername = async (searchTerm: string): Promise<Roo
             return { uid, data: val[uid] };
         }
       } catch (e: any) {
-        // Catch Missing Index Error specific to Firebase
         if (e.message && e.message.includes("Index not defined")) {
              console.error(`[Search_Fatal] Missing index for '${field}'.`);
              throw new Error(`MISSING_INDEX:${field}`);
@@ -183,26 +181,18 @@ export const findUserByEmailOrUsername = async (searchTerm: string): Promise<Roo
   };
 
   try {
-      // 1. Check Email
       let res = await runQuery('email', term);
-      
-      // 2. Check Username (normalized with $)
       if (!res) {
           const uName = term.startsWith('$') ? term : '$' + term;
           res = await runQuery('username', uName);
       }
-
-      // 3. Check Username (Capitalized)
       if (!res && term.length > 0) {
           const capitalized = '$' + term.charAt(0).toUpperCase() + term.slice(1);
           if (capitalized !== term) res = await runQuery('username', capitalized);
       }
-
-      // 4. Check Display Name
       if (!res) {
           res = await runQuery('displayName', term);
       }
-
       if (res) {
           return {
               uid: res.uid,
@@ -213,7 +203,6 @@ export const findUserByEmailOrUsername = async (searchTerm: string): Promise<Roo
               status: 'accepted'
           };
       }
-
       console.log("[Search] No user found with provided credentials.");
       return null;
   } catch (e: any) {
@@ -223,13 +212,11 @@ export const findUserByEmailOrUsername = async (searchTerm: string): Promise<Roo
 };
 
 export const addRoomerToUser = async (currentUid: string, targetUid: string) => {
-  console.log(`[Add_Action] Adding ${targetUid} to ${currentUid}'s list`);
   try {
       const updates: any = {};
       updates[`roomers/${currentUid}/addedRoomers/${targetUid}`] = 'pending';
       updates[`roomers/${targetUid}/pendingApprovals/${currentUid}`] = true;
       await update(ref(db), updates);
-      console.log("[Add_Action] Database update finished.");
   } catch (e: any) {
       console.error("[Add_Action] FAILED:", e.message);
       throw e;
@@ -237,21 +224,18 @@ export const addRoomerToUser = async (currentUid: string, targetUid: string) => 
 };
 
 export const approveRoomer = async (currentUid: string, targetUid: string) => {
-    console.log(`[Approval] Approving ${targetUid}`);
     try {
         const updates: any = {};
         updates[`roomers/${currentUid}/pendingApprovals/${targetUid}`] = null;
         updates[`roomers/${currentUid}/addedRoomers/${targetUid}`] = 'accepted';
         updates[`roomers/${targetUid}/addedRoomers/${currentUid}`] = 'accepted';
         await update(ref(db), updates);
-        console.log("[Approval] SUCCESS");
     } catch (e: any) {
         console.error("[Approval] FAILED:", e.message);
     }
 };
 
 export const deleteRoomer = async (currentUid: string, targetUid: string) => {
-    console.log(`[Delete] Removing ${targetUid}`);
     try {
         const updates: any = {};
         updates[`roomers/${currentUid}/addedRoomers/${targetUid}`] = null;
@@ -259,7 +243,6 @@ export const deleteRoomer = async (currentUid: string, targetUid: string) => {
         updates[`roomers/${targetUid}/addedRoomers/${currentUid}`] = null;
         updates[`roomers/${targetUid}/pendingApprovals/${currentUid}`] = null;
         await update(ref(db), updates);
-        console.log("[Delete] SUCCESS");
     } catch (e: any) {
         console.error("[Delete] FAILED:", e.message);
     }
