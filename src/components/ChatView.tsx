@@ -201,18 +201,6 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
       }
   };
 
-  useEffect(() => {
-    if (previousScrollHeight.current > 0 && containerRef.current) {
-        const newScrollHeight = containerRef.current.scrollHeight;
-        const diff = newScrollHeight - previousScrollHeight.current;
-        containerRef.current.scrollTop = diff;
-        previousScrollHeight.current = 0;
-    } 
-    else if (!isLoadingOlder && bottomRef.current && !isInitialMount.current && pullOffset === 0) {
-        bottomRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [messages, isLoadingOlder, pullOffset]);
-
   // --- SIMPLE COPY LOGIC ---
   const handleCopyMessage = async (text: string) => {
       if (!navigator.clipboard) return;
@@ -290,6 +278,7 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
 
             console.log(`[Notify] Stale: ${isStale}, DiffRoom: ${isDifferentRoom}, ShouldSend: ${shouldSend}`);
             console.log(`[Notify_XRAY] SW Controller:`, navigator.serviceWorker?.controller);
+            console.log(`[Notify_XRAY] Permission:`, Notification.permission);
 
             if (targetToken && shouldSend) {
                  const myName = currentUser.displayName || 'Rooms User';

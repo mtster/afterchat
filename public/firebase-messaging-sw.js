@@ -16,6 +16,17 @@ firebase.initializeApp(firebaseConfig);
 
 const messaging = firebase.messaging();
 
+// CRITICAL: Claim control immediately to ensure navigator.serviceWorker.controller is populated
+self.addEventListener('activate', (event) => {
+  event.waitUntil(clients.claim());
+  console.log('[firebase-messaging-sw.js] Service Worker Activated & Clients Claimed');
+});
+
+self.addEventListener('install', (event) => {
+    self.skipWaiting();
+    console.log('[firebase-messaging-sw.js] Service Worker Installed & Skip Waiting');
+});
+
 // Handles background messages.
 messaging.onBackgroundMessage(async (payload) => {
   console.log('[firebase-messaging-sw.js] Received background message: ', payload);

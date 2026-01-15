@@ -5,96 +5,91 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const timestamp = new Date().toISOString();
   console.log(`[API_Notify_XRAY] [${timestamp}] Incoming Request`);
 
-  // 1. Environment Variable X-Ray
-  console.log('[API_XRAY] Checking Env Vars:', { 
-    project: !!process.env.FIREBASE_PROJECT_ID, 
-    email: !!process.env.FIREBASE_CLIENT_EMAIL, 
-    key: !!process.env.FIREBASE_PRIVATE_KEY 
-  });
-
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+  // 1. Defensive Body Extraction
+  let body = req.body;
+  
+  // Vercel sometimes passes body as a string string if headers aren't perfect
+  if (typeof body === 'string') {
+    try {
+        body = JSON.parse(body);
+    } catch (e) {
+        console.error('[API_Notify_XRAY] JSON Parse Failed:', e);
+        // Continue with empty body to trigger validation error below
+        body = {};
+    }
   }
 
+  const { token, title, body: msgBody, data } = body || {};
+
+  // 2. Token Validation (Existence Check - Replaces .length check)
+  if (!token) {
+      console.warn(`[API_Notify_XRAY] Skipped: Missing Token.`);
+      return res.status(400).json({ 
+          error: "Missing Required Fields", 
+          received: Object.keys(body || {}) 
+      });
+  }
+
+  // 3. Robust Admin Initialization
+  // CRITICAL FIX: Use optional chaining to prevent "Cannot read properties of undefined (reading 'length')"
+  if (!admin.apps?.length) {
+      console.log('[API_Notify_XRAY] Initializing Firebase Admin...');
+      
+      const projectId = process.env.FIREBASE_PROJECT_ID;
+      const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+      const rawKey = process.env.FIREBASE_PRIVATE_KEY;
+
+      if (!rawKey || !projectId || !clientEmail) {
+          console.error('[API_Notify_XRAY] Missing Env Vars');
+          return res.status(500).json({ error: 'Server Environment Variables Missing' });
+      }
+
+      // Exact Key Normalization Logic (Handles Vercel's literal \n string)
+      const privateKey = rawKey.replace(/\\n/g, '\n');
+
+      const credentialModule = admin.credential || (admin as any).default?.credential;
+      
+      if (!credentialModule) {
+           console.error('[API_Notify_XRAY] Firebase Admin Credential module missing');
+           return res.status(500).json({ error: 'Library Error' });
+      }
+
+      try {
+          admin.initializeApp({
+              credential: credentialModule.cert({
+                  projectId,
+                  clientEmail,
+                  privateKey,
+              }),
+          });
+          console.log('[API_XRAY] Firebase Admin Initialized Successfully');
+      } catch (initErr: any) {
+          console.error('[API_XRAY] Initialization Failed:', initErr.message);
+          return res.status(500).json({ error: 'Initialization Failed', details: initErr.message });
+      }
+  }
+
+  // 4. Construct Payload
+  const safeText = msgBody || 'New Message';
+  const safeTitle = title || 'AfterChat';
+
+  const payload = {
+    token: token,
+    notification: {
+      title: safeTitle,
+      body: String(safeText).substring(0, 100)
+    },
+    data: data || { roomId: '' }
+  };
+
+  console.log('[API_Notify_XRAY] Validated token. Sending to FCM...');
+
   try {
-    const { token, title, body: messageBody, data } = req.body || {};
-
-    // 2. Token Validation
-    if (!token || typeof token !== 'string') {
-        console.warn(`[API_Notify_XRAY] Skipped: Invalid Token. Type: ${typeof token}`);
-        return res.status(200).json({ status: 'skipped', reason: 'invalid_token' });
-    }
-
-    // 3. Robust Admin Initialization
-    if (!admin.apps.length) {
-        console.log('[API_Notify_XRAY] Initializing Firebase Admin...');
-        
-        const projectId = process.env.FIREBASE_PROJECT_ID;
-        const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-        const rawKey = process.env.FIREBASE_PRIVATE_KEY;
-
-        if (!rawKey || !projectId || !clientEmail) {
-            throw new Error('Missing Server Environment Variables');
-        }
-
-        // Exact Key Normalization Logic
-        const formattedKey = rawKey.replace(/\\n/g, '\n');
-
-        // Robust Credential Access (Fix for "reading cert of undefined")
-        const credentialModule = admin.credential || (admin as any).default?.credential;
-        
-        if (!credentialModule) {
-            throw new Error('Firebase Admin Credential module not found (Import Error)');
-        }
-
-        try {
-            admin.initializeApp({
-                credential: credentialModule.cert({
-                    projectId,
-                    clientEmail,
-                    privateKey: formattedKey,
-                }),
-            });
-            console.log('[API_XRAY] Firebase Admin Initialized Successfully');
-        } catch (initErr: any) {
-            console.error('[API_XRAY] Initialization Failed:', initErr.message);
-            throw initErr;
-        }
-    }
-
-    // 4. Send Payload
-    const safeText = messageBody || 'New Message';
-    const safeTitle = title || 'AfterChat';
-
-    const payload = {
-      token: token,
-      notification: {
-        title: safeTitle,
-        body: String(safeText).substring(0, 100)
-      },
-      data: data || { roomId: '' }
-    };
-
-    console.log('[API_Notify_XRAY] Validated token. Sending to FCM...');
-
-    try {
-        const response = await admin.messaging().send(payload);
-        console.log(`[API_Notify_XRAY] Success: ${response}`);
-        return res.status(200).json({ success: true, messageId: response });
-    } catch (fcmError: any) {
-        console.error('[API_Notify_XRAY] FCM Send Error Stack:', fcmError.stack);
-        throw fcmError;
-    }
-
-  } catch (error: any) {
-    console.error('[API_Notify_XRAY] FATAL ERROR:', error.message);
-    console.error('[API_Notify_XRAY] Error Stack:', error.stack);
-    
-    return res.status(200).json({ 
-      error: 'Notification Failed', 
-      details: error.message || 'Unknown Error',
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
-      logged: true 
-    });
+      const response = await admin.messaging().send(payload);
+      console.log(`[API_Notify_XRAY] Success: ${response}`);
+      return res.status(200).json({ success: true, messageId: response });
+  } catch (fcmError: any) {
+      console.error('[API_Notify_XRAY] FCM Send Error Stack:', fcmError.stack);
+      return res.status(500).json({ error: 'FCM Send Failed', details: fcmError.message });
   }
 }
