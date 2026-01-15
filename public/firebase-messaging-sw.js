@@ -5,6 +5,7 @@ importScripts('https://www.gstatic.com/firebasejs/9.22.0/firebase-messaging-comp
 const firebaseConfig = {
   apiKey: "AIzaSyDySZZawrO-SMWtEEYlQJca82uxr9uDPt0",
   authDomain: "afterchat.firebaseapp.com",
+  databaseURL: "https://afterchat-default-rtdb.europe-west1.firebasedatabase.app/",
   projectId: "afterchat",
   storageBucket: "afterchat.firebasestorage.app",
   messagingSenderId: "78791482786",
@@ -16,16 +17,13 @@ firebase.initializeApp(firebaseConfig);
 const messaging = firebase.messaging();
 
 // Handles background messages.
-// Since we are sending a "notification" payload from Google Apps Script, 
-// the browser should handle this automatically. 
-// We include this listener just for logging/debugging.
 messaging.onBackgroundMessage(async (payload) => {
-  console.log('[firebase-messaging-sw.js] Received background message ', payload);
-  // No manual showNotification needed because 'notification' key in payload handles it.
+  console.log('[firebase-messaging-sw.js] Received background message: ', payload);
 });
 
 // Handle notification click
 self.addEventListener('notificationclick', function(event) {
+  console.log('[firebase-messaging-sw.js] Notification clicked');
   event.notification.close();
   // Open the app or focus window
   event.waitUntil(
@@ -33,7 +31,6 @@ self.addEventListener('notificationclick', function(event) {
       // If a window is already open, focus it
       if (clientList.length > 0) {
         let client = clientList[0];
-        // Focus the first available client
         return client.focus();
       }
       // Otherwise open new

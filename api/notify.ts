@@ -29,6 +29,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           throw new Error("Missing Server Environment Variables");
       }
 
+      // HANDLE QUOTES: If user added quotes in Vercel UI (e.g. "-----BEGIN..."), strip them.
+      if (privateKey.startsWith('"') && privateKey.endsWith('"')) {
+          console.log('[API_Notify] Detected and removed surrounding quotes from Private Key.');
+          privateKey = privateKey.slice(1, -1);
+      }
+
+      // HANDLE NEWLINES: Restore newline characters
       if (privateKey.includes("\\n")) {
           privateKey = privateKey.replace(/\\n/g, '\n');
       }

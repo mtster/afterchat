@@ -58,6 +58,7 @@ export const requestAndStoreToken = async (uid: string) => {
         console.warn("[FCM_Setup] Notifications API not available in this window context.");
         return;
     }
+
     const msg = await messaging();
     if (!msg) {
         console.warn("[FCM_Setup] Messaging instance failed to initialize.");
@@ -74,28 +75,44 @@ export const requestAndStoreToken = async (uid: string) => {
     }
 
     if (permission === 'granted') {
+        // CRITICAL UPDATE: Wait for Service Worker to be ready
+        console.log("[FCM_Setup] Permission granted. Waiting for Service Worker ready state...");
+        
+        if (!('serviceWorker' in navigator)) {
+             console.error("[FCM_Setup] Service Workers are not supported in this browser.");
+             return;
+        }
+
+        const registration = await navigator.serviceWorker.ready;
+        console.log("[FCM_Setup] Service Worker is ready:", registration.scope);
+
         console.log(`[FCM_Setup] Fetching token with VAPID Key: ${VAPID_KEY.substring(0, 10)}...`);
         
         try {
-            const token = await getToken(msg, { vapidKey: VAPID_KEY });
+            // Pass the registration to getToken to ensure it uses the correct SW
+            const token = await getToken(msg, { 
+                vapidKey: VAPID_KEY,
+                serviceWorkerRegistration: registration 
+            });
+
             if (token) {
                 console.log(`[FCM_Setup] Token obtained: ${token.substring(0, 15)}...`);
                 await update(ref(db, `roomers/${uid}`), { fcmToken: token });
                 console.log("[FCM_Setup] Token successfully saved to Realtime Database.");
             } else {
-                console.warn("[FCM_Setup] getToken returned null/empty string.");
+                console.warn("[FCM_Setup] No token generated - check VAPID key and PWA status. Token is null.");
             }
         } catch (tokenErr: any) {
             console.error("[FCM_Setup] getToken failed:", tokenErr);
             if (tokenErr.message.includes("no active Service Worker")) {
-                console.warn("[FCM_Setup] Tip: Ensure firebase-messaging-sw.js is in /public");
+                console.warn("[FCM_Setup] Tip: Ensure firebase-messaging-sw.js is in /public and registered correctly in index.tsx.");
             }
         }
     } else {
         console.warn(`[FCM_Setup] Permission denied or dismissed (${permission}).`);
     }
   } catch (e: any) {
-      console.error("[FCM_Setup] Fatal Error:", e);
+      console.error("[FCM_Setup] Fatal Error during token request:", e);
   }
 };
 
