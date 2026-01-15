@@ -281,16 +281,22 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
     }
 
     try {
+        console.log(`[Notify] Checking recipient details for: ${recipient.uid}`);
         const snapshot = await get(child(ref(db), `roomers/${recipient.uid}`));
         if (snapshot.exists()) {
             const val = snapshot.val();
             const targetToken = val.fcmToken;
             const recipientActiveRoom = val.activeRoom;
             
-            // Stale Detection: If lastOnline was > 30s ago, consider them offline/backgrounded
+            // Stale Detection
             const lastSeen = val.lastOnline || 0;
-            const isStale = (Date.now() - lastSeen) > 30000; // 30 seconds
+            const timeDiff = Date.now() - lastSeen;
+            const isStale = timeDiff > 30000; // 30 seconds
             
+            console.log(`[Notify] Recipient Active Room: ${recipientActiveRoom}`);
+            console.log(`[Notify] Recipient Last Online: ${Math.round(timeDiff/1000)}s ago (Stale: ${isStale})`);
+            console.log(`[Notify] Target Token: ${targetToken ? 'Present' : 'MISSING'}`);
+
             // NOTIFY IF: (Token Exists) AND ( (Not in room) OR (In room but Stale) )
             if (targetToken && (recipientActiveRoom !== roomId || isStale)) {
                  const mySnapshot = await get(child(ref(db), `roomers/${currentUser.uid}`));
@@ -300,8 +306,7 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
                  // USE RELATIVE PATH to avoid CORS on preview deployments
                  const endpoint = '/api/notify';
 
-                 console.log(`[Vercel] Triggering Notification via ${endpoint}`);
-                 console.log(`[Vercel] Target: ${targetToken.substring(0, 10)}... (Stale: ${isStale})`);
+                 console.log(`[Notify] TRIGGERING Notification via ${endpoint}...`);
 
                  fetch(endpoint, {
                     method: 'POST',
@@ -314,30 +319,32 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
                     })
                  })
                  .then(async res => {
+                     console.log(`[Notify] Fetch Response Status: ${res.status}`);
                      if (!res.ok) {
                          const errText = await res.text();
-                         console.error(`[Vercel] HTTP Error ${res.status}: ${errText}`);
+                         console.error(`[Notify] HTTP Error: ${errText}`);
                          return;
                      }
                      const data = await res.json();
-                     console.log("[Vercel] SUCCESS:", data);
+                     console.log("[Notify] SUCCESS:", data);
                  })
                  .catch(error => {
-                     console.error("[Vercel] Network Fetch FAILED");
-                     // Log Full Error Object Properties
+                     console.error("[Notify] Fetch FAILED");
                      const errObj = Object.getOwnPropertyNames(error).reduce((acc, key) => {
                         acc[key] = (error as any)[key];
                         return acc;
                      }, {} as any);
-                     console.error(`[Vercel] Details:`, JSON.stringify(errObj));
+                     console.error(`[Notify] Details:`, JSON.stringify(errObj));
                  });
 
             } else {
-                 console.log("[Vercel] Skipped: Recipient active in room.");
+                 console.log("[Notify] Skipped: Recipient is active in room and not stale.");
             }
+        } else {
+            console.warn("[Notify] Recipient profile not found in DB.");
         }
     } catch (e: any) {
-        console.error("[Vercel] Logic failed", e.message);
+        console.error("[Notify] Logic failed", e.message);
     }
   };
 

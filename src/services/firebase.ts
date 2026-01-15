@@ -20,11 +20,11 @@ import {
 import { getMessaging, isSupported, getToken, onMessage, MessagePayload } from "firebase/messaging";
 import { UserProfile, Roomer } from "../types";
 
-export const VAPID_KEY = "YOUR_VAPID_KEY_HERE"; 
+export const VAPID_KEY = "BCBn5bm4gG3CmNeLo-E9KzZInuRYwtA_byl9pHw5XiuW5Py-DQRcuCh-uWqLf0kmfzA6bqS0nNq4a6l9EP9KPE8"; 
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: "afterchat.vercel.app",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
@@ -43,51 +43,59 @@ export const signUpWithEmail = (email: string, pass: string) => createUserWithEm
 export const messaging = async () => {
   try {
     const supported = await isSupported();
+    if (!supported) console.log("[FCM_Init] Browser does not support messaging.");
     return supported ? getMessaging(app) : null;
-  } catch (err) {
+  } catch (err: any) {
+    console.error("[FCM_Init] Error checking support:", err.message);
     return null;
   }
 };
 
 export const requestAndStoreToken = async (uid: string) => {
-  console.log(`[FCM] Initializing token sync for: ${uid}`);
+  console.log(`[FCM_Setup] Starting token sync for User: ${uid}`);
   try {
     if (typeof window === 'undefined' || !('Notification' in window)) {
-        console.warn("[FCM] Notifications not supported in this browser.");
+        console.warn("[FCM_Setup] Notifications API not available in this window context.");
         return;
     }
     const msg = await messaging();
     if (!msg) {
-        console.warn("[FCM] Messaging is not supported or failed to initialize.");
+        console.warn("[FCM_Setup] Messaging instance failed to initialize.");
         return;
     }
 
     let permission = Notification.permission;
-    console.log(`[FCM] Current status: ${permission}`);
+    console.log(`[FCM_Setup] Current permission state: ${permission}`);
 
     if (permission === 'default') {
-        console.log("[FCM] Prompting user for permission...");
+        console.log("[FCM_Setup] Requesting permission...");
         permission = await Notification.requestPermission();
-        console.log(`[FCM] User response: ${permission}`);
+        console.log(`[FCM_Setup] Permission request result: ${permission}`);
     }
 
     if (permission === 'granted') {
-        const currentVapidKey = VAPID_KEY !== "YOUR_VAPID_KEY_HERE" ? VAPID_KEY : import.meta.env.VITE_FIREBASE_VAPID_KEY;
-        console.log(`[FCM] Fetching token with VAPID key...`);
+        console.log(`[FCM_Setup] Fetching token with VAPID Key: ${VAPID_KEY.substring(0, 10)}...`);
         
-        const token = await getToken(msg, { vapidKey: currentVapidKey });
-        if (token) {
-            console.log(`[FCM] Token generated: ${token.substring(0, 15)}...`);
-            await update(ref(db, `roomers/${uid}`), { fcmToken: token });
-            console.log("[FCM] SUCCESS: Token stored in database.");
-        } else {
-            console.warn("[FCM] Token generation returned null.");
+        try {
+            const token = await getToken(msg, { vapidKey: VAPID_KEY });
+            if (token) {
+                console.log(`[FCM_Setup] Token obtained: ${token.substring(0, 15)}...`);
+                await update(ref(db, `roomers/${uid}`), { fcmToken: token });
+                console.log("[FCM_Setup] Token successfully saved to Realtime Database.");
+            } else {
+                console.warn("[FCM_Setup] getToken returned null/empty string.");
+            }
+        } catch (tokenErr: any) {
+            console.error("[FCM_Setup] getToken failed:", tokenErr);
+            if (tokenErr.message.includes("no active Service Worker")) {
+                console.warn("[FCM_Setup] Tip: Ensure firebase-messaging-sw.js is in /public");
+            }
         }
     } else {
-        console.warn(`[FCM] Cannot fetch token: Permission is ${permission}`);
+        console.warn(`[FCM_Setup] Permission denied or dismissed (${permission}).`);
     }
   } catch (e: any) {
-      console.error("[FCM_Fatal]", e.message);
+      console.error("[FCM_Setup] Fatal Error:", e);
   }
 };
 
@@ -96,7 +104,7 @@ export const setupNotifications = (uid: string) => requestAndStoreToken(uid);
 export const onMessageListener = async (callback: (payload: MessagePayload) => void) => {
   const msg = await messaging();
   if (msg) onMessage(msg, (payload) => {
-    console.log("[FCM] Foreground message received:", payload);
+    console.log("[FCM_Foreground] Message received:", payload);
     callback(payload);
   });
 };
