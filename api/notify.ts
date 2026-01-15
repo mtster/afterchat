@@ -11,42 +11,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     // 1. Safe Body Extraction
-    const body = req.body || {};
-    const targetToken = body.token;
-    const title = body.title;
-    const messageBody = body.body;
-    const data = body.data;
+    const { token, title, body: messageBody, data } = req.body || {};
 
-    // 2. Token Validation
-    if (!targetToken || typeof targetToken !== 'string') {
-        console.warn(`[API_Notify_XRAY] Skipped: Invalid Token. Type: ${typeof targetToken}`);
+    // 2. Token Validation (Existence Check)
+    if (!token || typeof token !== 'string') {
+        console.warn(`[API_Notify_XRAY] Skipped: Invalid Token. Type: ${typeof token}`);
         return res.status(200).json({ status: 'skipped', reason: 'invalid_token' });
     }
 
-    console.log('[API_Notify_XRAY] Attempting send to token:', targetToken.substring(0, 10) + '...');
-
-    // 3. Admin Initialization
-    if (!admin.apps.length) {
+    // 3. Admin Initialization (Defensive Coding)
+    // Check if admin.apps exists before checking length
+    if (!admin.apps?.length) {
         console.log('[API_Notify_XRAY] Initializing Firebase Admin...');
         
         const projectId = process.env.FIREBASE_PROJECT_ID;
         const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
         let privateKey = process.env.FIREBASE_PRIVATE_KEY;
 
-        if (!privateKey) {
-            throw new Error('Private Key is missing from Environment Variables');
+        if (!privateKey || !projectId || !clientEmail) {
+            throw new Error('Missing Server Environment Variables (Project ID, Email, or Key)');
         }
 
-        // Sanitize Private Key (remove quotes, fix newlines)
+        // Sanitize Private Key
         if (privateKey.startsWith('"') && privateKey.endsWith('"')) {
             privateKey = privateKey.slice(1, -1);
         }
-        // Replace literal \n with actual newlines
         privateKey = privateKey.replace(/\\n/g, '\n');
-
-        if (!projectId || !clientEmail) {
-            throw new Error('Missing Project ID or Client Email');
-        }
 
         try {
             admin.initializeApp({
@@ -59,7 +49,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             console.log('[API_Notify_XRAY] Admin Initialized successfully.');
         } catch (initErr: any) {
             console.error('[API_Notify_XRAY] Init Failed:', initErr);
-            throw initErr; // Re-throw to be caught by main catch block
+            throw initErr;
         }
     }
 
@@ -68,30 +58,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const safeTitle = title || 'AfterChat';
 
     const payload = {
-      token: targetToken,
+      token: token,
       notification: {
         title: safeTitle,
         body: String(safeText).substring(0, 100)
       },
-      data: data || { roomId: '' },
-      android: {
-        priority: 'high' as const,
-        notification: {
-          icon: 'icon_192',
-          color: '#000000'
-        }
-      },
-      apns: {
-        payload: {
-          aps: {
-            contentAvailable: true
-          }
-        }
-      }
+      data: data || { roomId: '' }
     };
 
-    // 5. Send with explicit Try/Catch
+    console.log('[API_Notify_XRAY] Validated token and payload successfully');
     console.log('[API_Notify_XRAY] Sending payload to FCM...');
+
+    // 5. Send
     try {
         const response = await admin.messaging().send(payload);
         console.log(`[API_Notify_XRAY] Success: ${response}`);
@@ -103,12 +81,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   } catch (error: any) {
     console.error('[API_Notify_XRAY] FATAL ERROR:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
-    
-    // Return 200 to client to avoid retry loops, but log error details
     return res.status(200).json({ 
       error: 'Notification Failed', 
       details: error.message || 'Unknown Error',
-      fullError: JSON.stringify(error, Object.getOwnPropertyNames(error)),
       logged: true 
     });
   }

@@ -27,8 +27,7 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
   
   // Long Press & Copy State
   const [activeMessageId, setActiveMessageId] = useState<string | null>(null);
-  const [popoverPosition, setPopoverPosition] = useState<'top' | 'bottom'>('top');
-  const [justCopiedId, setJustCopiedId] = useState<string | null>(null);
+  const [isCopied, setIsCopied] = useState(false);
   const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -214,81 +213,32 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
     }
   }, [messages, isLoadingOlder, pullOffset]);
 
-  // --- ROBUST COPY LOGIC ---
-  const handleCopyMessage = async (text: string, msgId: string) => {
-      console.log(`[Copy] Attempting to copy message: ${msgId}`);
-      
-      const onSuccess = () => {
-          console.log(`[Copy] SUCCESS for ${msgId}`);
-          setJustCopiedId(msgId); // Trigger UI change
-          if (navigator.vibrate) navigator.vibrate([10, 50, 10]);
+  // --- SIMPLE COPY LOGIC ---
+  const handleCopyMessage = async (text: string) => {
+      if (!navigator.clipboard) return;
+      try {
+          await navigator.clipboard.writeText(text);
+          setIsCopied(true);
+          if (navigator.vibrate) navigator.vibrate(20);
           
           setTimeout(() => {
-            console.log(`[Copy] Resetting state for ${msgId}`);
-            setJustCopiedId(null);
-            setActiveMessageId(null);
-          }, 2000);
-      };
-
-      try {
-        // Method 1: Modern API
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-            await navigator.clipboard.writeText(text);
-            onSuccess();
-        } else {
-            throw new Error("Clipboard API unavailable");
-        }
+             setIsCopied(false);
+             setActiveMessageId(null);
+          }, 1000); // 1 second success state
       } catch (err) {
-        console.warn("[Copy] Clipboard API failed, trying execCommand fallback...", err);
-        // Method 2: Fallback
-        try {
-            const textArea = document.createElement("textarea");
-            textArea.value = text;
-            
-            // Avoid scrolling to bottom
-            textArea.style.top = "0";
-            textArea.style.left = "0";
-            textArea.style.position = "fixed";
-            textArea.style.opacity = "0";
-            textArea.style.pointerEvents = "none";
-
-            document.body.appendChild(textArea);
-            textArea.focus();
-            textArea.select();
-
-            const successful = document.execCommand('copy');
-            document.body.removeChild(textArea);
-            
-            if (successful) {
-                onSuccess();
-            } else {
-                console.error("[Copy] Both methods failed.");
-                alert("Could not copy text. Please try manually.");
-            }
-        } catch (fallbackErr) {
-            console.error("[Copy] Fallback failed:", fallbackErr);
-        }
+          console.error('Failed to copy', err);
       }
   };
 
   const handlePressStart = (e: React.TouchEvent | React.MouseEvent, msgId: string) => {
-    // We only trigger long press if not already active to avoid flickering
     if (activeMessageId === msgId) return;
     
     if (pressTimer.current) clearTimeout(pressTimer.current);
     setActiveMessageId(null);
-    setJustCopiedId(null);
+    setIsCopied(false);
 
-    const target = e.currentTarget as HTMLElement;
-    
     pressTimer.current = setTimeout(() => {
-        console.log(`[LongPress] Activated for ${msgId}`);
-        const rect = target.getBoundingClientRect();
-        const showBelow = rect.top < 120; // 120px threshold for header
-        
-        setPopoverPosition(showBelow ? 'bottom' : 'top');
         setActiveMessageId(msgId);
-        
         if (navigator.vibrate) navigator.vibrate(20);
     }, 500);
   };
@@ -334,20 +284,10 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
             const timeDiff = Date.now() - lastSeen;
             const isStale = timeDiff > 30000; // 30 seconds
 
-            console.log(`[Notify] Logic Check:`);
-            console.log(`- Recipient Active Room: ${recipientActiveRoom} (Current Room: ${roomId})`);
-            console.log(`- Recipient Last Seen: ${Math.floor(timeDiff/1000)}s ago (Stale: ${isStale})`);
-            console.log(`- Token Available: ${!!targetToken}`);
-
-            // Logic: Send if user is active in DIFFERENT room OR is in current room but Stale.
-            // Simplified: If (ActiveRoom != roomId) -> They are elsewhere.
-            // If (ActiveRoom == roomId) but Stale -> They are here but backgrounded.
-            
             const isDifferentRoom = recipientActiveRoom !== roomId;
             const shouldSend = isDifferentRoom || isStale;
 
             if (targetToken && shouldSend) {
-                 console.log(`[Notify] Triggering Notification (Reason: ${isStale ? 'Stale' : 'Different Room'})`);
                  const myName = currentUser.displayName || 'Rooms User';
                  
                  const payload = {
@@ -363,17 +303,8 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
-                 })
-                 .then(async (res) => {
-                     const txt = await res.text();
-                     console.log(`[Notify] API Response [${res.status}]: ${txt}`);
-                 })
-                 .catch(err => console.error("[Notify] Fetch failed:", err));
-            } else {
-                console.log(`[Notify] Skipped: User is active and online in this room.`);
+                 }).catch(err => console.error("[Notify] Fetch failed:", err));
             }
-        } else {
-            console.warn(`[Notify] Recipient profile missing.`);
         }
     } catch (e: any) {
         console.error(`[Notify] Logic execution failed: ${e.message}`);
@@ -435,76 +366,47 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
 
         <div 
             className="p-4 space-y-4 min-h-[101%]" 
-            // Important: Only clear selection if we are NOT currently in the "Just Copied" state
-            onClick={() => { 
-                if (!justCopiedId) setActiveMessageId(null); 
-            }}
+            onClick={() => setActiveMessageId(null)}
         > 
             {messages.map((msg) => {
               const isMe = msg.senderId === currentUser.uid;
               const isActive = activeMessageId === msg.id;
-              const isCopied = justCopiedId === msg.id;
 
               return (
                 <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'} relative group select-none`}>
                    
-                  {/* Message Bubble Wrapper with Events */}
                   <div 
                     className="relative"
                     onTouchStart={(e) => handlePressStart(e, msg.id)}
                     onTouchEnd={handlePressEnd}
                     onTouchMove={handlePressEnd}
-                    onMouseDown={(e) => handlePressStart(e, msg.id)} // Desktop fallback
+                    onMouseDown={(e) => handlePressStart(e, msg.id)}
                     onMouseUp={handlePressEnd}
                     onMouseLeave={handlePressEnd}
                     style={{ WebkitTouchCallout: 'none' }}
                   >
-                     {/* Dynamic Copy Menu Popover */}
+                     {/* Minimal Copy Button */}
                      {isActive && (
-                        <div 
-                            className={`absolute z-50 ${isMe ? 'right-0' : 'left-0'} flex flex-col items-center animate-in fade-in zoom-in-95 duration-200
-                                ${popoverPosition === 'top' ? 'bottom-full mb-2' : 'top-full mt-2'}
-                            `}
-                            onClick={(e) => { 
-                                e.stopPropagation(); // Block backdrop click
-                                console.log("[CopyUI] Popover container clicked");
-                            }}
-                        >
-                            <button 
+                        <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-50 animate-in fade-in duration-200">
+                             <button 
                                 onClick={(e) => { 
                                     e.preventDefault();
-                                    e.stopPropagation(); // Critical: Stop propagation
-                                    handleCopyMessage(msg.text, msg.id); 
+                                    e.stopPropagation(); 
+                                    handleCopyMessage(msg.text); 
                                 }}
-                                className={`
-                                    flex items-center gap-2 px-4 py-2 rounded-full shadow-2xl border transition-all duration-300 whitespace-nowrap
-                                    ${isCopied 
-                                        ? 'bg-green-600 border-green-500 text-white scale-110' 
-                                        : 'bg-zinc-800 border-zinc-700 text-white active:bg-zinc-700'
-                                    }
-                                `}
-                            >
-                                {isCopied ? <Check size={14} className="stroke-[3]" /> : <Copy size={14} />}
-                                <span className="text-xs font-bold tracking-wide">{isCopied ? 'Copied' : 'Copy'}</span>
-                            </button>
-                            
-                            {/* Little triangle arrow */}
-                            <div className={`
-                                w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent transition-colors duration-300
-                                ${popoverPosition === 'top' 
-                                    ? `border-t-[6px] ${isCopied ? 'border-t-green-600' : 'border-t-zinc-800'}`
-                                    : `border-b-[6px] ${isCopied ? 'border-b-green-600' : 'border-b-zinc-800'} order-first`
-                                }
-                            `}></div>
+                                className="bg-zinc-900 text-white border border-zinc-700 shadow-2xl rounded-lg px-3 py-1.5 flex items-center gap-2 active:bg-black transition-colors"
+                             >
+                                {isCopied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
+                                <span className="text-xs font-bold">{isCopied ? 'Copied' : 'Copy'}</span>
+                             </button>
                         </div>
                      )}
 
-                     {/* The Message Bubble */}
                      <div 
                         className={`
                             max-w-[75vw] px-4 py-2 rounded-2xl text-[15px] leading-snug break-words transition-all duration-200 ease-out origin-center
                             ${isMe ? 'bg-blue-600 text-white rounded-tr-sm' : 'bg-zinc-800 text-zinc-100 rounded-tl-sm'}
-                            ${isActive ? 'scale-[1.03] brightness-110 shadow-lg' : 'scale-100'}
+                            ${isActive ? 'brightness-110 scale-[1.02]' : ''}
                         `}
                      >
                         {formatMessageWithLinks(msg.text)}
