@@ -208,8 +208,16 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
     // 2. Initial Load: FORCE SCROLL TO BOTTOM
     else if (isInitialMount.current && messages.length > 0 && containerRef.current) {
         console.log(`[ChatView] Initial Load (${messages.length} msgs). Scrolling to bottom.`);
-        containerRef.current.scrollTop = containerRef.current.scrollHeight;
-        isInitialMount.current = false;
+        
+        // Fix for "opening at top" issue: Ensure DOM layout is complete before scrolling
+        requestAnimationFrame(() => {
+            setTimeout(() => {
+                if (containerRef.current) {
+                    containerRef.current.scrollTop = containerRef.current.scrollHeight;
+                    isInitialMount.current = false;
+                }
+            }, 50); // Small delay to guarantee paint
+        });
     }
     // 3. New Message Incoming: Auto-scroll if close to bottom or previously at bottom
     else if (!isLoadingOlder && bottomRef.current && !isInitialMount.current && pullOffset === 0) {

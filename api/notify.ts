@@ -5,23 +5,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const timestamp = new Date().toISOString();
   console.log(`[API_Notify_XRAY] [${timestamp}] Incoming Request`);
 
+  // --- IMPORT DEBUGGING ---
+  // Inspect what Vercel actually gave us in the import
+  const adminAny = admin as any;
+  console.log('[API_Notify_XRAY] Admin Import Structure:', {
+      type: typeof admin,
+      hasDefault: !!adminAny.default,
+      rootKeys: Object.keys(admin).slice(0, 5), // Log first 5 keys to avoid clutter
+      defaultKeys: adminAny.default ? Object.keys(adminAny.default).slice(0, 5) : 'N/A'
+  });
+
+  // COMPATIBILITY FIX: Normalize firebase-admin instance
+  // In some Vercel/Webpack configs, the library is in .default
+  const firebaseAdmin = adminAny.default || admin;
+
+  if (!firebaseAdmin || typeof firebaseAdmin.initializeApp !== 'function') {
+      console.error('[API_Notify_XRAY] CRITICAL: firebaseAdmin.initializeApp is not a function');
+      console.error('[API_Notify_XRAY] Admin Object:', JSON.stringify(firebaseAdmin, null, 2));
+      // Attempt to continue, but likely will fail. This log is vital.
+  }
+
   // 1. Defensive Body Extraction
   let body = req.body;
   
-  // Vercel sometimes passes body as a string string if headers aren't perfect
   if (typeof body === 'string') {
     try {
         body = JSON.parse(body);
     } catch (e) {
         console.error('[API_Notify_XRAY] JSON Parse Failed:', e);
-        // Continue with empty body to trigger validation error below
         body = {};
     }
   }
 
   const { token, title, body: msgBody, data } = body || {};
 
-  // 2. Token Validation (Existence Check - Replaces .length check)
+  // 2. Token Validation
   if (!token) {
       console.warn(`[API_Notify_XRAY] Skipped: Missing Token.`);
       return res.status(400).json({ 
@@ -31,8 +49,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // 3. Robust Admin Initialization
-  // CRITICAL FIX: Use optional chaining to prevent "Cannot read properties of undefined (reading 'length')"
-  if (!admin.apps?.length) {
+  // Use the normalized firebaseAdmin object
+  if (!firebaseAdmin.apps?.length) {
       console.log('[API_Notify_XRAY] Initializing Firebase Admin...');
       
       const projectId = process.env.FIREBASE_PROJECT_ID;
@@ -44,19 +62,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return res.status(500).json({ error: 'Server Environment Variables Missing' });
       }
 
-      // Exact Key Normalization Logic (Handles Vercel's literal \n string)
       const privateKey = rawKey.replace(/\\n/g, '\n');
 
-      const credentialModule = admin.credential || (admin as any).default?.credential;
-      
-      if (!credentialModule) {
-           console.error('[API_Notify_XRAY] Firebase Admin Credential module missing');
-           return res.status(500).json({ error: 'Library Error' });
-      }
-
       try {
-          admin.initializeApp({
-              credential: credentialModule.cert({
+          firebaseAdmin.initializeApp({
+              credential: firebaseAdmin.credential.cert({
                   projectId,
                   clientEmail,
                   privateKey,
@@ -85,7 +95,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   console.log('[API_Notify_XRAY] Validated token. Sending to FCM...');
 
   try {
-      const response = await admin.messaging().send(payload);
+      const response = await firebaseAdmin.messaging().send(payload);
       console.log(`[API_Notify_XRAY] Success: ${response}`);
       return res.status(200).json({ success: true, messageId: response });
   } catch (fcmError: any) {
