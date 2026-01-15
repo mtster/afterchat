@@ -27,7 +27,8 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
   
   // Long Press & Copy State
   const [activeMessageId, setActiveMessageId] = useState<string | null>(null);
-  const [showCopiedToast, setShowCopiedToast] = useState(false);
+  const [popoverPosition, setPopoverPosition] = useState<'top' | 'bottom'>('top');
+  const [justCopiedId, setJustCopiedId] = useState<string | null>(null);
   const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -214,14 +215,24 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
   }, [messages, isLoadingOlder, pullOffset]);
 
   // --- LONG PRESS LOGIC ---
-  const handlePressStart = (id: string) => {
-    // Clear any existing timer or state
+  const handlePressStart = (e: React.TouchEvent | React.MouseEvent, msgId: string) => {
     if (pressTimer.current) clearTimeout(pressTimer.current);
     setActiveMessageId(null);
+    setJustCopiedId(null);
+
+    // Get touch coordinates or element position for smart placement
+    const target = e.currentTarget as HTMLElement;
     
     pressTimer.current = setTimeout(() => {
-        setActiveMessageId(id);
-        if (navigator.vibrate) navigator.vibrate(10); // Haptic feedback
+        // Calculate position relative to viewport
+        const rect = target.getBoundingClientRect();
+        // If the top of the bubble is within 100px of the top of the viewport (near header), show below.
+        const showBelow = rect.top < 100;
+        
+        setPopoverPosition(showBelow ? 'bottom' : 'top');
+        setActiveMessageId(msgId);
+        
+        if (navigator.vibrate) navigator.vibrate(15);
     }, 500);
   };
 
@@ -232,12 +243,22 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
     }
   };
 
-  const handleCopyMessage = (text: string) => {
-      navigator.clipboard.writeText(text).then(() => {
-          setActiveMessageId(null);
-          setShowCopiedToast(true);
-          setTimeout(() => setShowCopiedToast(false), 2000);
-      });
+  const handleCopyMessage = async (text: string, msgId: string) => {
+      try {
+        await navigator.clipboard.writeText(text);
+        setJustCopiedId(msgId);
+        if (navigator.vibrate) navigator.vibrate(5);
+        
+        // Wait a moment so user sees the "Copied" state, then close menu
+        setTimeout(() => {
+            setActiveMessageId(null);
+            setJustCopiedId(null);
+        }, 1200);
+      } catch (e) {
+        console.error("Copy failed", e);
+        // Fallback for some browsers if async clipboard API fails
+        setActiveMessageId(null);
+      }
   };
 
   const handleSend = async (e: React.FormEvent) => {
@@ -263,7 +284,6 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
     }
 
     // Fire & Forget Notification
-    console.log(`[Chat] Message sent to ${recipient.displayName}. Checking notification rules...`);
     try {
         const snapshot = await get(child(ref(db), `roomers/${recipient.uid}`));
         if (snapshot.exists()) {
@@ -271,18 +291,10 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
             const targetToken = val.fcmToken;
             const recipientActiveRoom = val.activeRoom;
             const lastSeen = val.lastOnline || 0;
-            const timeDiff = Date.now() - lastSeen;
-            const isStale = timeDiff > 30000; // 30 seconds
-
-            console.log(`[Notify] Logic Check:`);
-            console.log(`- Recipient Active Room: ${recipientActiveRoom} (Current Room: ${roomId})`);
-            console.log(`- Recipient Last Seen: ${Math.floor(timeDiff/1000)}s ago (Stale: ${isStale})`);
-            console.log(`- Token Available: ${!!targetToken}`);
+            const isStale = (Date.now() - lastSeen) > 30000;
 
             if (targetToken && (recipientActiveRoom !== roomId || isStale)) {
-                 console.log(`[Notify] Sending API Request to /api/notify...`);
                  const myName = currentUser.displayName || 'Rooms User';
-                 
                  fetch('/api/notify', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -292,21 +304,10 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
                         body: text,
                         data: { roomId: roomId, senderId: currentUser.uid }
                     })
-                 })
-                 .then(async (res) => {
-                     const txt = await res.text();
-                     console.log(`[Notify] API Response [${res.status}]: ${txt}`);
-                 })
-                 .catch(err => console.error("[Notify] Fetch failed:", err));
-            } else {
-                console.log(`[Notify] Skipped: User is active in this room.`);
+                 }).catch(err => console.error("Notify fail:", err));
             }
-        } else {
-            console.warn(`[Notify] Recipient profile missing.`);
         }
-    } catch (e: any) {
-        console.error(`[Notify] Logic execution failed: ${e.message}`);
-    }
+    } catch (e) {}
   };
 
   const formatMessageWithLinks = (text: string) => {
@@ -325,12 +326,6 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
   return (
     <div className={`flex flex-col h-[100dvh] w-screen bg-background fixed inset-0 z-20 transition-transform duration-300 ease-in-out ${isVisible ? 'translate-x-0' : 'translate-x-full'}`}>
       
-      {/* Copied Toast */}
-      <div className={`fixed top-20 left-1/2 transform -translate-x-1/2 bg-zinc-800 text-white px-4 py-2 rounded-full shadow-xl z-50 flex items-center gap-2 transition-opacity duration-300 pointer-events-none border border-zinc-700 ${showCopiedToast ? 'opacity-100' : 'opacity-0'}`}>
-         <Check size={14} className="text-green-400" />
-         <span className="text-xs font-medium">Copied to clipboard</span>
-      </div>
-
       {/* Header */}
       <div className="flex-none grid grid-cols-6 items-center px-4 py-3 border-b border-border bg-background/90 backdrop-blur-md sticky top-0 z-40" style={{ paddingTop: 'max(16px, env(safe-area-inset-top))' }}>
         <button onClick={handleBack} className="col-span-1 justify-self-start text-white p-2 -ml-2 active:opacity-50">
@@ -368,46 +363,72 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
             </div>
         </div>
 
-        <div className="p-4 space-y-4 min-h-[101%]" onClick={() => setActiveMessageId(null)}> 
+        <div 
+            className="p-4 space-y-4 min-h-[101%]" 
+            onClick={() => { if (!justCopiedId) setActiveMessageId(null); }}
+        > 
             {messages.map((msg) => {
               const isMe = msg.senderId === currentUser.uid;
               const isActive = activeMessageId === msg.id;
+              const isCopied = justCopiedId === msg.id;
 
               return (
-                <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'} relative group`}>
+                <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'} relative group select-none`}>
                    
                   {/* Message Bubble Wrapper with Events */}
                   <div 
                     className="relative"
-                    onTouchStart={() => handlePressStart(msg.id)}
+                    onTouchStart={(e) => handlePressStart(e, msg.id)}
                     onTouchEnd={handlePressEnd}
                     onTouchMove={handlePressEnd}
-                    onMouseDown={() => handlePressStart(msg.id)} // Desktop fallback
+                    onMouseDown={(e) => handlePressStart(e, msg.id)} // Desktop fallback
                     onMouseUp={handlePressEnd}
                     onMouseLeave={handlePressEnd}
                     style={{ WebkitTouchCallout: 'none' }}
                   >
-                     {/* Copy Menu Popover */}
+                     {/* Dynamic Copy Menu Popover */}
                      {isActive && (
-                        <div className={`absolute z-50 ${isMe ? 'right-0' : 'left-0'} -top-12 animate-in fade-in slide-in-from-bottom-2 duration-200`}>
+                        <div 
+                            className={`absolute z-50 ${isMe ? 'right-0' : 'left-0'} flex flex-col items-center animate-in fade-in zoom-in-95 duration-200
+                                ${popoverPosition === 'top' ? 'bottom-full mb-2' : 'top-full mt-2'}
+                            `}
+                            onClick={(e) => e.stopPropagation()} // Prevent bubble closure
+                        >
                             <button 
-                                onClick={(e) => { e.stopPropagation(); handleCopyMessage(msg.text); }}
-                                className="flex items-center gap-2 bg-zinc-800 text-white px-3 py-2 rounded-xl shadow-2xl border border-zinc-700 active:bg-zinc-700 whitespace-nowrap"
+                                onClick={(e) => { 
+                                    e.preventDefault();
+                                    e.stopPropagation(); 
+                                    handleCopyMessage(msg.text, msg.id); 
+                                }}
+                                className={`
+                                    flex items-center gap-2 px-4 py-2 rounded-full shadow-2xl border transition-all duration-300 whitespace-nowrap
+                                    ${isCopied 
+                                        ? 'bg-green-600 border-green-500 text-white' 
+                                        : 'bg-zinc-800 border-zinc-700 text-white active:bg-zinc-700'
+                                    }
+                                `}
                             >
-                                <Copy size={14} />
-                                <span className="text-xs font-medium">Copy</span>
+                                {isCopied ? <Check size={14} className="stroke-[3]" /> : <Copy size={14} />}
+                                <span className="text-xs font-bold tracking-wide">{isCopied ? 'Copied' : 'Copy'}</span>
                             </button>
+                            
                             {/* Little triangle arrow */}
-                            <div className={`absolute bottom-[-5px] w-3 h-3 bg-zinc-800 border-r border-b border-zinc-700 transform rotate-45 ${isMe ? 'right-4' : 'left-4'}`}></div>
+                            <div className={`
+                                w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent
+                                ${popoverPosition === 'top' 
+                                    ? `border-t-[6px] ${isCopied ? 'border-t-green-600' : 'border-t-zinc-800'}`
+                                    : `border-b-[6px] ${isCopied ? 'border-b-green-600' : 'border-b-zinc-800'} order-first`
+                                }
+                            `}></div>
                         </div>
                      )}
 
                      {/* The Message Bubble */}
                      <div 
                         className={`
-                            max-w-[75vw] px-4 py-2 rounded-2xl text-[15px] leading-snug break-words transition-transform duration-200
+                            max-w-[75vw] px-4 py-2 rounded-2xl text-[15px] leading-snug break-words transition-all duration-200 ease-out origin-center
                             ${isMe ? 'bg-blue-600 text-white rounded-tr-sm' : 'bg-zinc-800 text-zinc-100 rounded-tl-sm'}
-                            ${isActive ? 'scale-105' : 'scale-100'}
+                            ${isActive ? 'scale-[1.03] brightness-110 shadow-lg' : 'scale-100'}
                         `}
                      >
                         {formatMessageWithLinks(msg.text)}

@@ -11,13 +11,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const { token, title, body, data } = req.body || {};
 
-    // 1. Strict Token Check
+    // 1. Exact Safety Guard: Check Token Type
     if (!token || typeof token !== 'string') {
-        console.warn('[API_Notify] Skipped: No valid token provided.');
-        return res.status(200).json({ message: 'No token provided, notification skipped.' });
+        console.warn('[API_Notify] Skipped: Invalid or missing token.');
+        return res.status(200).json({ message: 'No valid token provided' });
     }
 
-    // 2. Initialize Admin (Classic Pattern)
+    // 2. Initialize Admin
     if (!admin.apps.length) {
       console.log('[API_Notify] Initializing Firebase Admin...');
       
@@ -29,7 +29,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           throw new Error("Missing Server Environment Variables");
       }
 
-      // Handle Vercel newlines
       if (privateKey.includes("\\n")) {
           privateKey = privateKey.replace(/\\n/g, '\n');
       }
@@ -41,18 +40,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           privateKey,
         }),
       });
-      console.log("[API_Notify] Admin Initialized.");
     }
 
-    const finalBody = `🚀 ${body || 'New Message'}`;
+    // 3. Exact Safety Guard: Safe Text
+    const safeText = body || 'New Message';
+    const safeTitle = title || 'AfterChat';
     
-    const message = {
+    // 4. Structured Payload
+    const payload = {
       token: token,
       notification: {
-        title: title || 'New Message',
-        body: finalBody,
+        title: safeTitle,
+        body: safeText.substring(0, 100)
       },
-      data: data || {},
+      data: data || { roomId: '' },
       android: {
         priority: 'high' as const,
         notification: {
@@ -63,27 +64,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       apns: {
         payload: {
           aps: {
-            contentAvailable: true,
-            sound: 'default'
+            contentAvailable: true
           }
         }
       }
     };
 
-    console.log(`[API_Notify] Sending to ...${token.slice(-6)}`);
+    console.log(`[API_Notify] Sending payload to ...${token.slice(-6)}`);
 
-    // 3. Send Message
-    const response = await admin.messaging().send(message);
+    const response = await admin.messaging().send(payload);
     
     console.log(`[API_Notify] SUCCESS: ${response}`);
     return res.status(200).json({ success: true, messageId: response });
 
   } catch (error: any) {
-    console.error('[API_Notify] FATAL ERROR:', error);
-    // Return 200 even on error to prevent Client-side loops, but log the error
+    console.error('[API_Notify] ERROR:', error);
+    // Return 200 to client to prevent retry loops on 500
     return res.status(200).json({ 
       error: 'Notification Failed', 
-      details: error.message || 'Unknown Error',
+      details: error.message || 'Unknown',
       logged: true 
     });
   }
