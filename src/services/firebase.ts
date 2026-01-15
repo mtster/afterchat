@@ -118,11 +118,21 @@ export const requestAndStoreToken = async (uid: string) => {
 export const setupNotifications = (uid: string) => requestAndStoreToken(uid);
 
 export const onMessageListener = async (callback: (payload: MessagePayload) => void) => {
-  const msg = await messaging();
-  if (msg) onMessage(msg, (payload) => {
-    console.log("[FCM_Foreground_XRAY] Message received:", payload);
-    callback(payload);
-  });
+  try {
+      const msg = await messaging();
+      if (msg) {
+          onMessage(msg, (payload) => {
+            console.log("[FCM_Foreground_XRAY] Message received:", payload);
+            try {
+                callback(payload);
+            } catch (callbackErr) {
+                console.error("[FCM_Foreground_XRAY] Error in message callback:", callbackErr);
+            }
+          });
+      }
+  } catch (err) {
+      console.error("[FCM_Foreground_XRAY] Failed to setup message listener:", err);
+  }
 };
 
 export const updateUserProfile = async (uid: string, data: Partial<UserProfile>, retryCount = 0) => {
