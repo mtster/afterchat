@@ -263,31 +263,50 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
     }
 
     // Fire & Forget Notification
+    console.log(`[Chat] Message sent to ${recipient.displayName}. Checking notification rules...`);
     try {
-        get(child(ref(db), `roomers/${recipient.uid}`)).then(snapshot => {
-            if (snapshot.exists()) {
-                const val = snapshot.val();
-                const targetToken = val.fcmToken;
-                const recipientActiveRoom = val.activeRoom;
-                const lastSeen = val.lastOnline || 0;
-                const isStale = (Date.now() - lastSeen) > 30000;
+        const snapshot = await get(child(ref(db), `roomers/${recipient.uid}`));
+        if (snapshot.exists()) {
+            const val = snapshot.val();
+            const targetToken = val.fcmToken;
+            const recipientActiveRoom = val.activeRoom;
+            const lastSeen = val.lastOnline || 0;
+            const timeDiff = Date.now() - lastSeen;
+            const isStale = timeDiff > 30000; // 30 seconds
 
-                if (targetToken && (recipientActiveRoom !== roomId || isStale)) {
-                     const myName = currentUser.displayName || 'Rooms User';
-                     fetch('/api/notify', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            token: targetToken,
-                            title: `New Message from ${myName}`,
-                            body: text,
-                            data: { roomId: roomId, senderId: currentUser.uid }
-                        })
-                     }).catch(err => console.error("Notify fail:", err));
-                }
+            console.log(`[Notify] Logic Check:`);
+            console.log(`- Recipient Active Room: ${recipientActiveRoom} (Current Room: ${roomId})`);
+            console.log(`- Recipient Last Seen: ${Math.floor(timeDiff/1000)}s ago (Stale: ${isStale})`);
+            console.log(`- Token Available: ${!!targetToken}`);
+
+            if (targetToken && (recipientActiveRoom !== roomId || isStale)) {
+                 console.log(`[Notify] Sending API Request to /api/notify...`);
+                 const myName = currentUser.displayName || 'Rooms User';
+                 
+                 fetch('/api/notify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        token: targetToken,
+                        title: `New Message from ${myName}`,
+                        body: text,
+                        data: { roomId: roomId, senderId: currentUser.uid }
+                    })
+                 })
+                 .then(async (res) => {
+                     const txt = await res.text();
+                     console.log(`[Notify] API Response [${res.status}]: ${txt}`);
+                 })
+                 .catch(err => console.error("[Notify] Fetch failed:", err));
+            } else {
+                console.log(`[Notify] Skipped: User is active in this room.`);
             }
-        });
-    } catch (e) {}
+        } else {
+            console.warn(`[Notify] Recipient profile missing.`);
+        }
+    } catch (e: any) {
+        console.error(`[Notify] Logic execution failed: ${e.message}`);
+    }
   };
 
   const formatMessageWithLinks = (text: string) => {
