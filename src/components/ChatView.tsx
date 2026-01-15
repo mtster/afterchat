@@ -258,6 +258,19 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
     }
   }, [messages, isLoadingOlder, pullOffset]);
 
+  const handlePaste = async () => {
+    try {
+        const text = await navigator.clipboard.readText();
+        if (text) {
+            setInputText(prev => prev + text);
+            if (inputRef.current) inputRef.current.focus();
+        }
+    } catch (err) {
+        console.error('Clipboard read failed', err);
+        alert("Clipboard access denied or empty. Please paste manually.");
+    }
+  };
+
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     const text = inputText.trim();
@@ -431,6 +444,14 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
             </div>
         ) : (
             <form onSubmit={handleSend} className="flex gap-2 items-center">
+             <button 
+                type="button" 
+                onClick={handlePaste}
+                className="w-10 h-10 rounded-full flex items-center justify-center transition-all flex-shrink-0 bg-zinc-800 text-zinc-400 hover:text-white active:scale-95"
+                title="Paste from Clipboard"
+             >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+            </button>
             <input ref={inputRef} type="text" value={inputText} onChange={(e) => setInputText(e.target.value)} placeholder="Message" className="flex-1 bg-black border border-zinc-700 rounded-full px-4 py-2 text-white placeholder-zinc-500 focus:outline-none focus:border-blue-500 transition-colors" autoComplete="off" enterKeyHint="send" />
             <button type="submit" disabled={!inputText.trim()} className={`w-10 h-10 rounded-full flex items-center justify-center transition-all flex-shrink-0 ${inputText.trim() ? 'bg-blue-600 text-white active:scale-95' : 'bg-zinc-800 text-zinc-500'}`}>
                 <svg className="w-5 h-5 ml-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M12 5l7 7-7 7" /></svg>
