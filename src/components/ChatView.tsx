@@ -285,7 +285,11 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
             const isStale = timeDiff > 30000; // 30 seconds
 
             const isDifferentRoom = recipientActiveRoom !== roomId;
+            // Logic Override: isStale forces notification
             const shouldSend = isDifferentRoom || isStale;
+
+            console.log(`[Notify] Stale: ${isStale}, DiffRoom: ${isDifferentRoom}, ShouldSend: ${shouldSend}`);
+            console.log(`[Notify_XRAY] SW Controller:`, navigator.serviceWorker?.controller);
 
             if (targetToken && shouldSend) {
                  const myName = currentUser.displayName || 'Rooms User';
@@ -303,7 +307,12 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
-                 }).catch(err => console.error("[Notify] Fetch failed:", err));
+                 })
+                 .then(async (res) => {
+                    const txt = await res.text();
+                    console.log(`[Notify] API Response [${res.status}]: ${txt}`);
+                 })
+                 .catch(err => console.error("[Notify] Fetch failed:", err));
             }
         }
     } catch (e: any) {
