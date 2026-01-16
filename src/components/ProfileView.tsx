@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { UserProfile, Roomer } from '../types';
 import { updateUserProfile, auth, db, getRoomerDetails, deleteRoomer, getUserProfile } from '../services/firebase';
 import { ref, onValue } from 'firebase/database';
+import { CURRENT_APP_VERSION } from '../version';
 
 interface Props {
   currentUser: UserProfile;
@@ -123,7 +124,17 @@ export default function ProfileView({ currentUser, onBack, toggleTheme, isDarkMo
                     ))}
                 </div>
             </div>
-            <div className="pt-8 border-t border-zinc-900 pb-10"><button onClick={handleSignOut} className="w-full py-4 text-red-500 font-medium bg-zinc-900/30 rounded-xl">Sign Out</button></div>
+            
+            <div className="pt-8 border-t border-zinc-900 pb-2">
+                <button onClick={handleSignOut} className="w-full py-4 text-red-500 font-medium bg-zinc-900/30 rounded-xl mb-6">Sign Out</button>
+                
+                {/* VERSION FOOTER */}
+                <div className="w-full text-center">
+                    <p className="text-zinc-600 text-xs font-mono">
+                        Version {CURRENT_APP_VERSION}
+                    </p>
+                </div>
+            </div>
         </div>
       </div>
     </div>

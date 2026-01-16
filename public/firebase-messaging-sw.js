@@ -23,8 +23,17 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('install', (event) => {
+    // If we receive a skipWaiting call, we activate immediately
     self.skipWaiting();
     console.log('[firebase-messaging-sw.js] Service Worker Installed & Skip Waiting');
+});
+
+// Listener for manual update triggers
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    console.log('[firebase-messaging-sw.js] Received SKIP_WAITING signal');
+    self.skipWaiting();
+  }
 });
 
 // Handles background messages.

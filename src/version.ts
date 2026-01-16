@@ -1,0 +1,1 @@
+export const CURRENT_APP_VERSION = "2.2.0";

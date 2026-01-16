@@ -8,6 +8,9 @@ import RoomsList from './components/RoomsList';
 import ProfileView from './components/ProfileView';
 import DebugConsole from './components/DebugConsole';
 import { UserProfile, AppView, Roomer } from './types'; 
+import { CURRENT_APP_VERSION } from './version';
+import { checkVersion, compareVersions } from './services/versionCheck';
+import { X, CheckCircle, Loader2 } from 'lucide-react';
 
 // Environment Detection Logic
 const LIVE_PRODUCTION_URL = 'afterchat.vercel.app';
@@ -33,6 +36,11 @@ export default function App() {
   const [loadingRoomers, setLoadingRoomers] = useState(true);
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [loadingAuth, setLoadingAuth] = useState(true);
+  
+  // Update System State
+  const [isInstallingUpdate, setIsInstallingUpdate] = useState(false);
+  const [showUpdateSuccess, setShowUpdateSuccess] = useState(false);
+  
   const viewRef = useRef<AppView>(view);
   const lastRoomersSnapshotRef = useRef<string>('');
 
@@ -40,6 +48,96 @@ export default function App() {
     localStorage.setItem('rooms_app_view', JSON.stringify(view));
     viewRef.current = view;
   }, [view]);
+
+  // --- VERSION CHECK & UPDATE LOGIC ---
+  useEffect(() => {
+    const performUpdateSequence = async (remoteVersion: string) => {
+        console.log(`[Update_System] Starting update sequence to ${remoteVersion}...`);
+        setIsInstallingUpdate(true);
+        
+        // 1. Trigger SW Update
+        if ('serviceWorker' in navigator) {
+            try {
+                const reg = await navigator.serviceWorker.getRegistration();
+                if (reg) {
+                    console.log("[Update_System] Sending SKIP_WAITING to SW...");
+                    if (reg.waiting) {
+                        reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+                    }
+                    await reg.update();
+                    console.log("[Update_System] SW Registration Updated.");
+                }
+            } catch (e) {
+                console.error("[Update_System] SW Update failed:", e);
+            }
+        }
+
+        // 2. Clear Caches (Optional safety net)
+        if ('caches' in window) {
+            try {
+                const keys = await caches.keys();
+                await Promise.all(keys.map(key => caches.delete(key)));
+                console.log("[Update_System] Browser Caches Cleared.");
+            } catch (e) {
+                console.error("[Update_System] Cache clear failed:", e);
+            }
+        }
+
+        // 3. Force Reload
+        console.log("[Update_System] Reloading window in 1.5s...");
+        setTimeout(() => {
+            window.location.reload();
+        }, 1500);
+    };
+
+    const runCheck = async () => {
+        console.log("[Update_System] Checking for updates...");
+        const { hasUpdate, remoteVersion } = await checkVersion();
+        
+        if (hasUpdate) {
+            console.log(`[Update_System] CRITICAL: Update found! ${CURRENT_APP_VERSION} -> ${remoteVersion}`);
+            performUpdateSequence(remoteVersion);
+        } else {
+            console.log("[Update_System] App is up to date.");
+        }
+    };
+
+    // Check on mount
+    runCheck();
+
+    // Check on focus
+    const handleVisibilityChange = () => {
+        if (document.visibilityState === 'visible') {
+            console.log("[Update_System] App focused. Re-checking version...");
+            runCheck();
+        }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // --- SUCCESS POPUP LOGIC ---
+    // Check if we just updated
+    const lastVersion = localStorage.getItem('rooms_cached_version');
+    console.log(`[Update_System] Previous stored version: ${lastVersion}, Current: ${CURRENT_APP_VERSION}`);
+    
+    if (!lastVersion) {
+        // First run ever
+        localStorage.setItem('rooms_cached_version', CURRENT_APP_VERSION);
+    } else if (compareVersions(CURRENT_APP_VERSION, lastVersion) > 0) {
+        // We have updated!
+        console.log("[Update_System] Update Success detected!");
+        setShowUpdateSuccess(true);
+    }
+
+    return () => {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
+
+  const dismissUpdateSuccess = () => {
+      setShowUpdateSuccess(false);
+      localStorage.setItem('rooms_cached_version', CURRENT_APP_VERSION);
+      console.log(`[Update_System] Version ${CURRENT_APP_VERSION} acknowledged and stored.`);
+  };
 
   // PRESENCE HEARTBEAT (Update lastOnline every 15s)
   useEffect(() => {
@@ -217,6 +315,39 @@ export default function App() {
   return (
     <div className={`w-screen h-[100dvh] relative flex flex-col overflow-hidden ${isDarkMode ? 'bg-black text-white' : 'bg-gray-100 text-black'}`}>
       {!isLiveSite && <DebugConsole />}
+      
+      {/* 1. Installing Overlay */}
+      {isInstallingUpdate && (
+          <div className="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center p-6 animate-in fade-in duration-300">
+              <div className="flex flex-col items-center gap-6">
+                 <Loader2 className="w-12 h-12 text-blue-500 animate-spin" />
+                 <div className="text-center">
+                    <h2 className="text-xl font-bold text-white mb-2">Installing Update...</h2>
+                    <p className="text-zinc-500 text-sm">Getting the latest version of Rooms.</p>
+                 </div>
+              </div>
+          </div>
+      )}
+
+      {/* 2. Success Popup */}
+      {showUpdateSuccess && !isInstallingUpdate && (
+          <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 w-full max-w-sm px-4 animate-in slide-in-from-bottom-4 fade-in duration-500">
+              <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 shadow-2xl flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-green-900/30 flex items-center justify-center text-green-500">
+                          <CheckCircle size={20} />
+                      </div>
+                      <div>
+                          <h3 className="font-bold text-sm text-white">App Updated</h3>
+                          <p className="text-xs text-zinc-400">Now running version {CURRENT_APP_VERSION}</p>
+                      </div>
+                  </div>
+                  <button onClick={dismissUpdateSuccess} className="p-2 text-zinc-500 hover:text-white rounded-full bg-zinc-800/50">
+                      <X size={16} />
+                  </button>
+              </div>
+          </div>
+      )}
       
       <div className="flex-1 w-full h-full relative z-10 flex flex-col">
         {!userProfile ? ( <Login /> ) : (
