@@ -5,7 +5,12 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   setPersistence,
-  browserLocalPersistence
+  browserLocalPersistence,
+  deleteUser,
+  reauthenticateWithPopup,
+  reauthenticateWithCredential,
+  EmailAuthProvider,
+  User
 } from "firebase/auth";
 import { 
   getDatabase, 
@@ -15,7 +20,8 @@ import {
   child, 
   query, 
   orderByChild, 
-  equalTo 
+  equalTo,
+  remove 
 } from "firebase/database";
 import { getMessaging, isSupported, getToken, onMessage, MessagePayload } from "firebase/messaging";
 import { UserProfile, Roomer } from "../types";
@@ -141,6 +147,35 @@ export const onMessageListener = async (callback: (payload: MessagePayload) => v
   }
 };
 
+// --- HELPER FOR SYSTEM NOTIFICATIONS (Requests/Approvals) ---
+export const sendSystemNotification = async (targetUid: string, title: string, body: string) => {
+    try {
+        const snapshot = await get(child(ref(db), `roomers/${targetUid}`));
+        if (snapshot.exists()) {
+            const val = snapshot.val();
+            const targetToken = val.fcmToken;
+            
+            if (targetToken) {
+                const payload = {
+                    token: targetToken,
+                    title: title,
+                    body: body,
+                    data: { system: 'true' }
+                };
+                
+                // Fire and forget
+                fetch('/api/notify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                }).catch(err => console.error("SysNotify Error:", err));
+            }
+        }
+    } catch (e) {
+        console.error("SysNotify DB Error:", e);
+    }
+};
+
 export const updateUserProfile = async (uid: string, data: Partial<UserProfile>, retryCount = 0) => {
   console.log(`[Profile_Sync] Updating roomers/${uid}... (Attempt ${retryCount + 1})`);
   try {
@@ -167,9 +202,14 @@ export const getUserProfile = async (uid: string): Promise<UserProfile | null> =
   }
 };
 
-/**
- * Searches across Email, Username, and Display Name
- */
+export const deleteUserAccount = async (user: User) => {
+    const uid = user.uid;
+    // 1. Delete RTDB Data
+    await remove(ref(db, `roomers/${uid}`));
+    // 2. Delete Auth Account
+    await deleteUser(user);
+};
+
 export const findUserByEmailOrUsername = async (searchTerm: string): Promise<Roomer | null> => {
   const term = searchTerm.trim();
   const roomersRef = ref(db, 'roomers');

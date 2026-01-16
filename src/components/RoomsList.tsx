@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { db, findUserByEmailOrUsername, addRoomerToUser, setupNotifications, getRoomerDetails } from '../services/firebase';
+import { db, findUserByEmailOrUsername, addRoomerToUser, setupNotifications, getRoomerDetails, sendSystemNotification } from '../services/firebase';
 import { ref, onValue, off } from 'firebase/database';
 import { UserProfile, Roomer } from '../types';
 import { Bell, Plus, UserCircle } from 'lucide-react';
 import { approveRoomer, deleteRoomer } from '../services/firebase';
+import { getPreferredName } from '../utils/identity';
 
 interface Props {
   currentUser: UserProfile;
@@ -13,33 +14,32 @@ interface Props {
   onNavigateProfile: () => void;
 }
 
-// NOTE: We are handling roomers caching locally in this component to prevent "flash" of empty state
-// even though App.tsx also fetches roomers. Ideally, App.tsx should pass cached initial state.
-// However, for optimization, we will rely on Props but we can verify caching in the data layer.
-
 export default function RoomsList({ currentUser, roomers, loading, onNavigateChat, onNavigateProfile }: Props) {
   const [showAddModal, setShowAddModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [searchError, setSearchError] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
-  const [hasFcmToken, setHasFcmToken] = useState(false);
+  const [permissionStatus, setPermissionStatus] = useState<NotificationPermission>('default');
 
-  // Sync Bell Icon
+  // Sync Bell Icon Status & Permission
   useEffect(() => {
-    if (!currentUser.uid) return;
-    const tokenRef = ref(db, `roomers/${currentUser.uid}/fcmToken`);
-    const unsub = onValue(tokenRef, (snap) => setHasFcmToken(!!snap.val()));
-    return () => unsub();
-  }, [currentUser.uid]);
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+        setPermissionStatus(Notification.permission);
+    }
+  }, []);
 
-  // CACHING STRATEGY FOR ROOM LIST
-  // We use the `roomers` prop passed from App.tsx. 
-  // We can assume App.tsx will be updated to handle the caching, or we handle it here if we were fetching directly.
-  // Since `roomers` comes from App.tsx, let's optimize the render.
-  
-  // This component is purely presentation of the list + Add Logic. 
-  // The Data fetching optimization logic has been moved to App.tsx to ensure global state consistency.
-  
+  const handleNotificationRequest = async () => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    
+    // Trigger native popup
+    const perm = await Notification.requestPermission();
+    setPermissionStatus(perm);
+    
+    if (perm === 'granted') {
+        setupNotifications(currentUser.uid);
+    }
+  };
+
   const handleAddFlow = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const term = searchTerm.trim();
@@ -74,6 +74,10 @@ export default function RoomsList({ currentUser, roomers, loading, onNavigateCha
 
       console.log(`[Add_Flow] Match confirmed: ${result.displayName} (${result.uid}). Recording request.`);
       await addRoomerToUser(currentUser.uid, result.uid);
+
+      // --- NOTIFICATION: INCOMING REQUEST ---
+      const myIdentity = getPreferredName(currentUser);
+      await sendSystemNotification(result.uid, "Incoming Request", `${myIdentity} has sent you a rooming request`);
       
       console.log("[Add_Flow] Roomer added successfully.");
       setShowAddModal(false);
@@ -92,17 +96,42 @@ export default function RoomsList({ currentUser, roomers, loading, onNavigateCha
     }
   };
 
+  const handleApprove = async (roomer: Roomer) => {
+      await approveRoomer(currentUser.uid, roomer.uid);
+      // --- NOTIFICATION: APPROVED REQUEST ---
+      const myIdentity = getPreferredName(currentUser);
+      await sendSystemNotification(roomer.uid, "Approved request", `${myIdentity} has accepted your rooming request`);
+  };
+
+  const handleDecline = async (roomer: Roomer) => {
+      await deleteRoomer(currentUser.uid, roomer.uid);
+      // --- NOTIFICATION: DECLINED REQUEST ---
+      // Only send if it was an incoming request we are declining
+      if (roomer.status === 'pending_incoming') {
+          const myIdentity = getPreferredName(currentUser);
+          await sendSystemNotification(roomer.uid, "Declined Request", `${myIdentity} has declined your rooming request`);
+      }
+  };
+
   return (
     <div className="flex flex-col w-full h-full bg-background overflow-hidden">
       <div className="flex-none px-4 pb-3 flex items-center justify-between bg-zinc-900/50 backdrop-blur-md border-b border-zinc-800 sticky top-0 z-10" style={{ paddingTop: 'max(16px, env(safe-area-inset-top))' }}>
         <h1 className="text-2xl font-bold text-white tracking-tight">Rooms</h1>
         <div className="flex items-center gap-3">
-          <button 
-            onClick={() => setupNotifications(currentUser.uid)} 
-            className={`w-8 h-8 flex items-center justify-center rounded-full bg-zinc-800 hover:bg-zinc-700 active:scale-95 transition-all ${hasFcmToken ? 'text-green-500' : 'text-zinc-500'}`}
-          >
-            <Bell size={18} />
-          </button>
+          <div className="relative group">
+            <button 
+                onClick={handleNotificationRequest} 
+                className={`w-8 h-8 flex items-center justify-center rounded-full bg-zinc-800 hover:bg-zinc-700 active:scale-95 transition-all ${permissionStatus === 'granted' ? 'text-green-500' : 'text-zinc-500'}`}
+            >
+                <Bell size={18} />
+            </button>
+            {permissionStatus === 'granted' && (
+                <div className="absolute top-full mt-2 right-0 bg-zinc-900 border border-zinc-800 p-2 rounded-lg text-[10px] w-40 text-zinc-400 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-xl z-50">
+                    You have already granted permission.
+                </div>
+            )}
+          </div>
+
           <button onClick={() => setShowAddModal(true)} className="w-8 h-8 flex items-center justify-center rounded-full bg-zinc-800 hover:bg-zinc-700 active:scale-95 transition-all text-zinc-300">
             <Plus size={18} />
           </button>
@@ -130,21 +159,23 @@ export default function RoomsList({ currentUser, roomers, loading, onNavigateCha
             {roomers.map(roomer => {
                 const isIncoming = roomer.status === 'pending_incoming';
                 const isPending = roomer.status === 'pending_incoming' || roomer.status === 'pending_outgoing';
+                const displayName = getPreferredName(roomer);
+
                 return (
                   <button key={roomer.uid} onClick={() => onNavigateChat(roomer)} className={`w-full flex items-center gap-4 p-3 rounded-xl transition-colors active:bg-zinc-900 ${isPending ? 'bg-zinc-900/20 opacity-70' : 'hover:bg-zinc-900/50'}`}>
                     <div className={`w-12 h-12 rounded-full overflow-hidden flex-shrink-0 border border-zinc-700`}>
-                      {roomer.photoURL ? <img src={roomer.photoURL} className="w-full h-full object-cover" /> : <div className="w-full h-full bg-zinc-800 flex items-center justify-center text-zinc-500 font-bold">{roomer.displayName.charAt(0)}</div>}
+                      {roomer.photoURL ? <img src={roomer.photoURL} className="w-full h-full object-cover" /> : <div className="w-full h-full bg-zinc-800 flex items-center justify-center text-zinc-500 font-bold">{roomer.displayName?.charAt(0) || '?'}</div>}
                     </div>
                     <div className="flex-1 text-left min-w-0">
-                        <h3 className={`font-medium truncate ${isPending ? 'text-zinc-400' : 'text-white'}`}>{roomer.displayName}</h3>
-                        <p className="text-zinc-500 text-sm truncate">{isIncoming ? 'Received Request' : (roomer.status === 'pending_outgoing' ? 'Awaiting Approval' : (roomer.username || roomer.email))}</p>
+                        <h3 className={`font-medium truncate ${isPending ? 'text-zinc-400' : 'text-white'}`}>{displayName}</h3>
+                        <p className="text-zinc-500 text-sm truncate">{isIncoming ? 'Received Request' : (roomer.status === 'pending_outgoing' ? 'Awaiting Approval' : 'Tap to chat')}</p>
                     </div>
                     {isIncoming && (
                         <div className="flex gap-2">
-                            <button onClick={(e) => { e.stopPropagation(); deleteRoomer(currentUser.uid, roomer.uid); }} className="w-8 h-8 flex items-center justify-center rounded-full bg-zinc-900 text-red-500 active:scale-90 border border-zinc-800">
+                            <button onClick={(e) => { e.stopPropagation(); handleDecline(roomer); }} className="w-8 h-8 flex items-center justify-center rounded-full bg-zinc-900 text-red-500 active:scale-90 border border-zinc-800">
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                             </button>
-                            <button onClick={(e) => { e.stopPropagation(); approveRoomer(currentUser.uid, roomer.uid); }} className="w-8 h-8 flex items-center justify-center rounded-full bg-white text-black active:scale-90">
+                            <button onClick={(e) => { e.stopPropagation(); handleApprove(roomer); }} className="w-8 h-8 flex items-center justify-center rounded-full bg-white text-black active:scale-90">
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
                             </button>
                         </div>
@@ -159,7 +190,7 @@ export default function RoomsList({ currentUser, roomers, loading, onNavigateCha
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
           <div className="w-full max-w-sm bg-zinc-950 border border-zinc-800 rounded-3xl p-6 shadow-2xl ring-1 ring-white/5">
             <h2 className="text-xl font-bold text-white mb-2">Find Roomer</h2>
-            <p className="text-zinc-500 text-sm mb-6">Search by username, display name, or email.</p>
+            <p className="text-zinc-500 text-sm mb-6">Search by username ($...), display name, or email.</p>
             
             <form onSubmit={handleAddFlow} className="space-y-4">
                <div className="relative">

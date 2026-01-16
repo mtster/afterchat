@@ -4,6 +4,7 @@ import { db } from '../services/firebase';
 import { getCachedMessages, saveMessageToCache, saveBatchMessages } from '../services/indexedDB';
 import { Message, UserProfile, Roomer } from '../types';
 import { Copy, Check } from 'lucide-react';
+import { getPreferredName } from '../utils/identity';
 
 interface ChatViewProps {
   roomId: string;
@@ -124,7 +125,6 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
                 });
             }
         });
-        // Note: isInitialMount reset is handled in the effect below to ensure scroll happens first
     };
 
     initData();
@@ -209,19 +209,17 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
     else if (isInitialMount.current && messages.length > 0 && containerRef.current) {
         console.log(`[ChatView] Initial Load (${messages.length} msgs). Scrolling to bottom.`);
         
-        // Fix for "opening at top" issue: Ensure DOM layout is complete before scrolling
         requestAnimationFrame(() => {
             setTimeout(() => {
                 if (containerRef.current) {
                     containerRef.current.scrollTop = containerRef.current.scrollHeight;
                     isInitialMount.current = false;
                 }
-            }, 50); // Small delay to guarantee paint
+            }, 50);
         });
     }
     // 3. New Message Incoming: Auto-scroll if close to bottom or previously at bottom
     else if (!isLoadingOlder && bottomRef.current && !isInitialMount.current && pullOffset === 0) {
-        // We can add logic here to only scroll if user was at bottom, but for now we auto-scroll on new message
         bottomRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages, isLoadingOlder, pullOffset]);
@@ -302,18 +300,16 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
             const shouldSend = isDifferentRoom || isStale;
 
             console.log(`[Notify] Stale: ${isStale}, DiffRoom: ${isDifferentRoom}, ShouldSend: ${shouldSend}`);
-            console.log(`[Notify_XRAY] SW Controller:`, navigator.serviceWorker?.controller);
             
             // Safe Permission Check
             const perm = (typeof window !== 'undefined' && 'Notification' in window) ? Notification.permission : 'unknown';
-            console.log(`[Notify_XRAY] Permission:`, perm);
 
             if (targetToken && shouldSend) {
-                 const myName = currentUser.displayName || 'Rooms User';
+                 const myIdentity = getPreferredName(currentUser);
                  
                  const payload = {
                     token: targetToken,
-                    title: `New Message from ${myName}`,
+                    title: myIdentity,
                     body: text,
                     data: { roomId: roomId, senderId: currentUser.uid }
                  };
@@ -350,6 +346,8 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
     });
   };
 
+  const headerName = getPreferredName(recipient);
+
   return (
     <div className={`flex flex-col h-[100dvh] w-screen bg-background fixed inset-0 z-20 transition-transform duration-300 ease-in-out ${isVisible ? 'translate-x-0' : 'translate-x-full'}`}>
       
@@ -359,7 +357,7 @@ const ChatView: React.FC<ChatViewProps> = ({ roomId, recipient, currentUser, onB
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
         </button>
         <div className="col-span-4 flex flex-col items-center justify-center">
-            <span className="font-semibold text-[17px] text-white truncate max-w-[200px]">{recipient.displayName}</span>
+            <span className="font-semibold text-[17px] text-white truncate max-w-[200px]">{headerName}</span>
         </div>
         <div className="col-span-1" />
       </div>
